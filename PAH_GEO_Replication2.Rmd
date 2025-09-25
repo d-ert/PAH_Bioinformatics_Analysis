@@ -147,7 +147,10 @@ head(pheno_2_clean)
 
 Now we can merge the harmonized data into single objects.
 
-```{r Combine Data}
+
+```{r Combine Data and Annotate Genes }
+
+### Combine Data
 # Combine expression data
 combined_expr <- cbind(exprs_1_common, exprs_2_common_filtered)
 
@@ -157,10 +160,8 @@ combined_pheno <- rbind(pheno_1_clean, pheno_2_clean)
 # Verify that the initial combination is correct (100 samples)
 stopifnot(all(colnames(combined_expr) == rownames(combined_pheno)))
 cat("Combined expression matrix dimensions:", dim(combined_expr), "\n")
-```
 
-
-```{r Annotate Genes }
+## Annotate
 # Create mapping from probes to gene symbols
 cat("Mapping probe IDs to gene symbols...\n")
 probe_to_gene <- AnnotationDbi::select(hugene10sttranscriptcluster.db,
@@ -454,17 +455,17 @@ chosen_power <- 6
 ```{r Network Construction and Module Detection, cache=TRUE}
 # We will use the one-step blockwiseModules function.
 
-set.seed(123)
+#set.seed(42)
 options(cor = WGCNA::cor)
 
 net <- blockwiseModules(
   datExpr,
   power = chosen_power,
   TOMType = "signed",      # Used "signed" to distinguish between positive and negative
-  minModuleSize = 20,      # Test this one
-  reassignThreshold = 0,
-  mergeCutHeight = 0.4,     
-  numericLabels = TRUE,      # Returns numeric labels for modules
+  #minModuleSize = 30,      # Test this one
+  mergeCutHeight = 0.4,    # reassignThreshold = 0, deleted this one
+  loadTOM = TRUE,
+  numericLabels = TRUE,      
   pamRespectsDendro = FALSE,
   saveTOMs = TRUE,           
   saveTOMFileBase = "TOM",
@@ -553,8 +554,10 @@ ht <- Heatmap(
 
 draw(ht)
 
-set.seed(NULL)
+#set.seed(NULL)
 ```
+
+
 
 ```{r}
 # --- Extract Most Significant Positive and Negative Module NUMBERS ---
@@ -582,17 +585,7 @@ cat("\n--- Most Significant Module Numbers ---\n",
 ```
 
 
-
 ## Identify Module DEGs
-
-```{r}
-#top_genes
-#
-#module_assignments
-#
-##save module_assignments to txt
-#write.table(module_assignments, file = "module_assignments.txt", sep = "\t", quote = FALSE, col.names = NA)
-```
 
 
 ```{r Identify MDEGs}
@@ -669,9 +662,9 @@ grid.draw(venn.plot)
 ```{r}
 #filter the final_mdeg_list to only include genes of p<0.05 and |log2FC| > 1
 
-final_mdeg_list_filtered <- final_mdeg_list[final_mdeg_list %in% rownames(top_genes[top_genes$adj.P.Val < 0.05 & abs(top_genes$logFC) > 1, ])]
+final_mdeg_list_filtered <- final_mdeg_list[final_mdeg_list %in% rownames(top_genes[top_genes$adj.P.Val <= 0.05 & abs(top_genes$logFC) >= 1, ])]
 
-cat("Number of MDEGs with adj.P.Val < 0.05 and |log2FC| > 1:", length(final_mdeg_list_filtered), "\n")
+cat("Number of MDEGs with adj.P.Val <= 0.05 and |log2FC| >= 1:", length(final_mdeg_list_filtered), "\n")
 
 final_mdeg_list_filtered
 
@@ -710,7 +703,8 @@ go_results <- enrichGO(gene = entrez_ids,
                        keyType = "ENTREZID",
                        ont = "ALL",
                        pAdjustMethod = "BH",
-                       pvalueCutoff = 0.05)
+                       pvalueCutoff = 0.05,
+                       qvalueCutoff = 0.05)
 
 
 ```
@@ -763,12 +757,23 @@ print(p)
 
 ## KEGG Pathway Analysis
 
+```{r}
+# print the gene names of entrez_ids
+entrez_ids
+
+print(gene_map$SYMBOL)
+
+#print pure text
+
+```
+
 
 ```{r KEGG Enrichment Analysis, cache=TRUE}
 # 4. Perform KEGG Pathway Analysis
 kegg_results <- enrichKEGG(gene = entrez_ids,
-                           organism = 'hsa', # 'hsa' is the code for Homo sapiens
-                           pvalueCutoff = 0.05)
+                           organism = 'hsa', 
+                           pvalueCutoff = 0.05,
+                           qvalueCutoff = 0.05)
 
 
 kegg_results_df <- as.data.frame(kegg_results)
