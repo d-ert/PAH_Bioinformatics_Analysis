@@ -352,7 +352,6 @@ pheatmap(deg_expr_matrix,
 ```
 
 
-
 # Weighted Gene Co-expression Network Analysis (WGCNA)
 
 The goal is to find modules of co-expressed genes. 
@@ -462,7 +461,7 @@ net <- blockwiseModules(
   datExpr,
   power = chosen_power,
   TOMType = "signed",      # Used "signed" to distinguish between positive and negative
-  #minModuleSize = 30,      # Test this one
+  minModuleSize = 20,      # Test this one
   mergeCutHeight = 0.4,    # reassignThreshold = 0, deleted this one
   loadTOM = TRUE,
   numericLabels = TRUE,      
@@ -671,6 +670,24 @@ final_mdeg_list_filtered
 
 ```
 
+```{r}
+# Generate heatmap for MDEGs
+pheatmap(combat_expr[final_mdeg_list_filtered, ],
+         main = "Heatmap of MDEGs",
+         annotation_col = annotation_col,
+         scale = "row",          # Scale each gene's expression to have a mean of 0 and SD of 1 (Z-score)
+         show_rownames = TRUE,  # Show gene names
+         show_colnames = FALSE,  # Hides sample names for a cleaner look
+         cluster_cols = TRUE,    # Clusters the samples (columns) based on similarity
+         cluster_rows = TRUE,    # Clusters the genes (rows) based on similarity
+         treeheight_row = 0,     # Hides the row dendrogram for a cleaner look if desired
+         legend = TRUE
+)
+
+
+mdeg_stats <- all_genes[final_mdeg_list_filtered, ]
+mdeg_stats
+```
 
 
 
@@ -680,8 +697,6 @@ final_mdeg_list_filtered
 ## GO analysis
 
 ```{r GO Enrichment Analysis, cache=TRUE}
-# Load the required libraries
-
 
 # 1. Convert Gene Symbols to Entrez IDs
 gene_map <- bitr(final_mdeg_list_filtered, 
@@ -692,18 +707,14 @@ gene_map <- bitr(final_mdeg_list_filtered,
 entrez_ids <- gene_map$ENTREZID
 cat("Number of MDEGs successfully mapped to Entrez IDs:", length(entrez_ids), "\n")
 
-mapped_gene_symbols <- final_mdeg_list_filtered[final_mdeg_list_filtered %in% gene_map$SYMBOL]
-cat("Number of MDEGs successfully mapped to Gene Symbols:", length(mapped_gene_symbols), "\n\n")
-
 
 # 2. Perform GO Enrichment Analysis
-# For the enrichment itself, we use the general Human OrgDb
-go_results <- enrichGO(gene = entrez_ids,
+go_results <- enrichGO(gene = final_mdeg_list_filtered,
                        OrgDb = org.Hs.eg.db, 
-                       keyType = "ENTREZID",
+                       keyType = "SYMBOL",
                        ont = "ALL",
                        pAdjustMethod = "BH",
-                       pvalueCutoff = 0.05,
+                       #pvalueCutoff = 0.05,
                        qvalueCutoff = 0.05)
 
 
@@ -757,16 +768,6 @@ print(p)
 
 ## KEGG Pathway Analysis
 
-```{r}
-# print the gene names of entrez_ids
-entrez_ids
-
-print(gene_map$SYMBOL)
-
-#print pure text
-
-```
-
 
 ```{r KEGG Enrichment Analysis, cache=TRUE}
 # 4. Perform KEGG Pathway Analysis
@@ -778,7 +779,6 @@ kegg_results <- enrichKEGG(gene = entrez_ids,
 
 kegg_results_df <- as.data.frame(kegg_results)
 kegg_results_df$negLogAdjP <- -log10(kegg_results_df$p.adjust)
-kegg_results_df
 
 # Plot
 p <- ggplot(kegg_results_df, aes(x = negLogAdjP, y = reorder(Description, negLogAdjP), fill = subcategory)) +
@@ -804,18 +804,14 @@ ggsave("KEGG_dotplot2.png", plot = p, width = 8, height = 6, dpi = 300)
 
 ```{r}
 
-#emap_kegg_results <- pairwise_termsim(kegg_results)
-#kegg3 <- emapplot(emap_kegg_results, showCategory = 30, layout = "kk")
-#kegg3
-#ggsave("KEGG_emapplot.png", plot = kegg3, width = 8, height = 6, dpi = 300)
-#
-## 4. Cnetplot
-#kegg4 <- cnetplot(kegg_results, categorySize = "pvalue", foldChange = NULL)
-#kegg4
-#ggsave("KEGG_cnetplot.png", plot = kegg4, width = 8, height = 6, dpi = 300)
+#Cnetplot
+kegg4 <- cnetplot(kegg_results, categorySize = "pvalue", foldChange = NULL)
+kegg4
+ggsave("KEGG_cnetplot.png", plot = kegg4, width = 8, height = 6, dpi = 300)
 
 
 ```
+
 
 
 ## Protein-Protein Interaction (PPI) Network with STRING
@@ -826,7 +822,7 @@ ggsave("KEGG_dotplot2.png", plot = p, width = 8, height = 6, dpi = 300)
 string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400) # 9606 is the taxon ID for human
 
 # 2. Map your gene symbols to STRING identifiers
-mapped_genes <- string_db$map(data.frame(gene = mapped_gene_symbols), "gene", removeUnmappedRows = TRUE)
+mapped_genes <- string_db$map(data.frame(gene = final_mdeg_list_filtered), "gene", removeUnmappedRows = TRUE)
 
 
 # --- Part 3: Identify Hub Genes using Network Centrality ---
@@ -897,11 +893,6 @@ if (nrow(mapped_genes) > 0) {
 
 
 ```
-
-
-
-
-
 
 
 
@@ -1022,8 +1013,348 @@ ggsave("PPI_Community_Facet_Plot.png", width = 12, height = 8, dpi = 300)
 
 
 
+# Regulatory Network Construction
+
+Use the NetworkAnalyst web server to find miRNA and Transcription Factor (TF) interactions with your 10 hub genes. This step is performed on a website, not directly in R.
+
+```{r}
+hub_genes_list <- hub_genes$symbol
+
+# convert to enterez
+hub_genes_entrez <- bitr(hub_genes_list, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+hub_genes_entrez_ids <- hub_genes_entrez$ENTREZID
+hub_genes_entrez_ids
+```
+
+```{r image-insertion, echo=FALSE, fig.align='center', out.width='50%'}
+knitr::include_graphics("Network Analysis2.png")
+
+```
 
 
+
+# Immune Infiltration Analysis
+
+```{r CIBERSORT_Libraries, message=FALSE, warning=FALSE}
+# Install if you don't have them
+# install.packages(c("pheatmap", "corrplot", "vioplot", "tidyr", "ggpubr"))
+library(corrplot)
+library(vioplot)
+library(ggpubr)
+```
+
+## CIBERSORT Analysis
+
+```{r Run_CIBERSORT, cache=TRUE}
+# Load the CIBERSORT source script
+source("CIBERSORT.R")
+
+# --- Data Preparation ---
+# CIBERSORT requires the expression data to be non-log transformed and without negative values.
+# Your combat_expr is log2 transformed. We need to reverse this.
+cibersort_input <- 2^combat_expr
+
+# The ComBat output can sometimes contain very small negative numbers due to adjustments. Set them to 0.
+cibersort_input[cibersort_input < 0] <- 0
+
+# --- Run CIBERSORT ---
+# This function call might take a few minutes.
+# It uses the LM22 signature matrix for 22 immune cell types.
+# perm=100 runs 100 permutations for p-value calculation.
+results_cibersort <- CIBERSORT("LM22.txt", cibersort_input, perm = 100, QN = FALSE)
+
+# CIBERSORT returns a matrix. Let's look at the first few rows and columns.
+head(results_cibersort[, 1:6])
+
+# Filter results for samples with a significant deconvolution p-value (as suggested by the paper)
+results_cibersort_filtered <- as.data.frame(results_cibersort[results_cibersort[, "P-value"] < 0.05, ])
+# We only want the cell type proportions (the first 22 columns)
+immune_proportions <- results_cibersort_filtered[, 1:22]
+```
+
+
+## Visualize CIBERSORT Results
+
+```{r Visualize_CIBERSORT_Results}
+# --- Figure 5A: Bar Plot of Relative Percentages ---
+# Prepare data for ggplot
+immune_proportions_long <- immune_proportions %>%
+  as.data.frame() %>%
+  mutate(Sample = rownames(.)) %>%
+  pivot_longer(-Sample, names_to = "CellType", values_to = "Proportion")
+
+# Add the group information (PAH vs Normal)
+immune_proportions_long <- merge(immune_proportions_long, combined_pheno, by.x = "Sample", by.y = "row.names")
+
+
+ggplot(immune_proportions_long, aes(x = Sample, y = Proportion, fill = CellType)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~ group, scales = "free_x", nrow = 1) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") +
+  labs(title = "Relative Proportions of 22 Immune Cell Types", x = "Samples", y = "Proportion")
+
+
+# --- Figure 5B: Heatmap of Immune Cells ---
+pheatmap(t(immune_proportions),
+         main = "Heatmap of Immune Cell Infiltration",
+         annotation_col = data.frame(Group = combined_pheno$group, row.names = rownames(combined_pheno)),
+         show_colnames = FALSE,
+         scale = "row")
+
+
+# --- Figure 6A: Violin Plots Comparing Groups ---
+ggplot(immune_proportions_long, aes(x = group, y = Proportion, fill = group)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1, fill = "white") +
+  facet_wrap(~ CellType, scales = "free_y", ncol = 4) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif") + # Add significance
+  theme_bw() +
+  labs(title = "Immune Cell Infiltration: PAH vs. Normal", x = "Group", y = "Estimated Proportion")
+
+
+# --- Figure 6B: Correlation Matrix of Immune Cells ---
+cor_matrix <- cor(immune_proportions)
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black",
+         number.cex = 0.5,
+         main = "Correlation Matrix of Immune Cell Subtypes")
+
+```
+
+
+
+# Single-Cell Data Analysis
+
+This section replicates Figure 7 from the paper using Seurat. 
+
+```{r scRNA_Setup, message=FALSE, warning=FALSE}
+# Install if needed
+# remotes::install_github('satijalab/seurat-data')
+# install.packages(c("Seurat", "patchwork", "SingleR", "celldex"))
+library(Seurat)
+library(patchwork)
+```
+
+## Download and Process scRNA-seq Data
+```{r scRNA_Data_Download_and_Load, cache=TRUE}
+# This requires significant disk space and memory
+# Download the processed data matrices from GEO
+# Create a directory to store the files
+if (!dir.exists("GSE174589_RAW")) {
+  dir.create("GSE174589_RAW")
+}
+getGEOSuppFiles("GSE174589", makeDirectory = TRUE, baseDir = ".")
+
+# Unzip the main tar file
+untar("GSE174589/GSE174589_RAW.tar", exdir = "GSE174589_RAW")
+
+# Load the data for the three specified samples
+# The file paths might need adjustment depending on the extracted folder structure
+data_gsm1 <- Read10X(data.dir = "GSE174589_RAW/GSM5206779_PAH_P1_filtered_feature_bc_matrix/")
+data_gsm2 <- Read10X(data.dir = "GSE174589_RAW/GSM5206780_PAH_P2_filtered_feature_bc_matrix/")
+data_gsm3 <- Read10X(data.dir = "GSE174589_RAW/GSM5206781_PAH_P3_filtered_feature_bc_matrix/")
+
+# Create Seurat objects
+seurat_gsm1 <- CreateSeuratObject(counts = data_gsm1, project = "GSM5206779", min.cells = 3, min.features = 200)
+seurat_gsm2 <- CreateSeuratObject(counts = data_gsm2, project = "GSM5206780", min.cells = 3, min.features = 200)
+seurat_gsm3 <- CreateSeuratObject(counts = data_gsm3, project = "GSM5206781", min.cells = 3, min.features = 200)
+
+# Merge them into one object
+merged_seurat <- merge(seurat_gsm1, y = c(seurat_gsm2, seurat_gsm3), add.cell.ids = c("GSM1", "GSM2", "GSM3"))
+```
+
+
+## Standard Pre-processing and Clustering
+```{r scRNA_Processing, cache=TRUE}
+# --- Standard Seurat Pre-processing Workflow ---
+# 1. Quality Control
+merged_seurat[["percent.mt"]] <- PercentageFeatureSet(merged_seurat, pattern = "^MT-")
+merged_seurat <- subset(merged_seurat, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 15)
+
+# 2. Normalize and find variable features
+merged_seurat <- NormalizeData(merged_seurat)
+merged_seurat <- FindVariableFeatures(merged_seurat, selection.method = "vst", nfeatures = 2000)
+
+# 3. Scale data and run PCA
+all.genes <- rownames(merged_seurat)
+merged_seurat <- ScaleData(merged_seurat, features = all.genes)
+merged_seurat <- RunPCA(merged_seurat, features = VariableFeatures(object = merged_seurat))
+
+# 4. Clustering
+merged_seurat <- FindNeighbors(merged_seurat, dims = 1:15)
+merged_seurat <- FindClusters(merged_seurat, resolution = 0.5)
+
+# 5. Run t-SNE for visualization
+merged_seurat <- RunTSNE(merged_seurat, dims = 1:15)
+```
+
+
+## Visualize Clusters and Key Marker Genes
+```{r scRNA_Visualization}
+# --- Replicating Figure 7 ---
+
+# Figure 7A: t-SNE plot by sample identity
+DimPlot(merged_seurat, reduction = "tsne", group.by = "orig.ident", pt.size = 0.5) + labs(title="t-SNE by Sample")
+
+# Figure 7B: t-SNE plot of clusters
+DimPlot(merged_seurat, reduction = "tsne", label = TRUE, pt.size = 0.5) + NoLegend() + labs(title="t-SNE by Cluster")
+
+# Figure 7C: Cell-type annotations (Requires SingleR or manual annotation)
+# This is an advanced step. We'll use SingleR for automated annotation.
+library(SingleR)
+library(celldex)
+hpca.se <- HumanPrimaryCellAtlasData()
+
+# Run annotation
+pred <- SingleR(test = GetAssayData(merged_seurat, slot = "data"), ref = hpca.se, labels = hpca.se$label.main)
+
+# Add annotations to Seurat object
+merged_seurat$cell_type <- pred$labels[match(rownames(merged_seurat@meta.data), rownames(pred))]
+DimPlot(merged_seurat, reduction = "tsne", group.by = "cell_type", label = TRUE, repel = TRUE, pt.size = 0.5) + labs(title="t-SNE by Inferred Cell Type")
+
+
+# Figure 7F: Expression patterns of key marker genes (your hub genes!)
+# Use the hub genes you identified earlier
+FeaturePlot(merged_seurat,
+            features = hub_gene_symbols,
+            reduction = "tsne",
+            pt.size = 0.5,
+            order = TRUE)
+
+VlnPlot(merged_seurat, features = hub_gene_symbols, group.by = "cell_type", pt.size = 0)
+```
+
+
+
+
+
+
+
+
+# Candidate Drug Screening
+
+This section uses the API call for Comparative Toxicogenomic Database (CTD). The 10 identified hub genes were imported into CTD and screened for compounds that could reduce the functional effects of these hub genes. Specifically, compounds that could either reduce the expression of overexpressed genes in PAH patients or increase the expression of underexpressed genes were identified, serving as potential targeted drugs for PAH.
+
+
+```{r}
+# Install and load necessary packages
+if (!requireNamespace("httr", quietly = TRUE)) {
+  install.packages("httr")
+}
+if (!requireNamespace("jsonlite", quietly = TRUE)) {
+  install.packages("jsonlite")
+}
+library(httr)
+conflicts_prefer(httr::content)
+
+library(jsonlite)
+```
+
+
+
+
+```{r}
+# 2. Prepare to collect the data
+results <- list()
+cat("Querying CTD for chemical-gene interactions...\n")
+
+# 3. Iterate through each gene and query the CTD API
+for (gene in hub_genes$symbol) {
+  # Construct the API URL for curated chemical-gene interactions
+  url <- paste0("https://ctdbase.org/tools/batchQuery.go?inputType=gene&inputTerms=", gene, "&report=cgixns&format=json")
+  
+  response <- GET(url)
+  
+  if (http_type(response) == "application/json") {
+    data <- fromJSON(content(response, "text", encoding = "UTF-8"), flatten = TRUE)
+    if (length(data) > 0 && nrow(data) > 0) {
+      results[[gene]] <- data
+    }
+  } else {
+    warning(paste("Failed to retrieve data for gene:", gene))
+  }
+}
+
+cat("Processing results...\n")
+
+# 4. Process the results to create the ranked table
+all_interactions <- data.frame()
+
+# Combine all results into a single data frame
+for (gene in names(results)) {
+  results[[gene]]$HubGene <- gene
+  all_interactions <- rbind(all_interactions, results[[gene]])
+}
+
+# Check if any interactions were found
+if (nrow(all_interactions) > 0) {
+  # Filter for interactions related to "expression"
+  expression_interactions <- all_interactions[grepl("expression", all_interactions$InteractionActions, ignore.case = TRUE), ]
+  
+  # Get unique compound names and IDs
+  unique_compounds <- unique(expression_interactions[, c("ChemicalName", "ChemicalID")])
+  
+  # Create a list to store the summary for each compound
+  compound_summary_list <- list()
+  
+  # Loop through each unique compound to summarize its effects
+  for (i in 1:nrow(unique_compounds)) {
+    compound_name <- unique_compounds[i, "ChemicalName"]
+    compound_id <- unique_compounds[i, "ChemicalID"]
+    
+    # Get all expression interactions for this specific compound
+    compound_interactions <- expression_interactions[expression_interactions$ChemicalName == compound_name, ]
+    
+    # Identify genes with increased expression
+    increased_genes <- unique(compound_interactions$HubGene[grepl("increases", compound_interactions$InteractionActions, ignore.case = TRUE)])
+    
+    # Identify genes with decreased expression
+    decreased_genes <- unique(compound_interactions$HubGene[grepl("decreases", compound_interactions$InteractionActions, ignore.case = TRUE)])
+    
+    # Calculate the total number of unique hub genes affected
+    total_affected_genes <- base::union(increased_genes, decreased_genes)
+    affected_gene_count <- length(total_affected_genes)
+    
+    # Store the summary for this compound
+    compound_summary_list[[i]] <- data.frame(
+      `Compound.name` = compound_name,
+      `Compound.ID` = compound_id,
+      `Increase.gene.expression` = paste(sort(increased_genes), collapse = ", "),
+      `Decrease.gene.expression` = paste(sort(decreased_genes), collapse = ", "),
+      `Affected.Hub.Genes.Count` = affected_gene_count,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Combine the list of summaries into one final data frame
+  drug_candidates <- do.call(rbind, compound_summary_list)
+  
+  # Sort the final table based on the number of affected hub genes, in descending order
+  drug_candidates <- drug_candidates[order(-drug_candidates$Affected.Hub.Genes.Count), ]
+  
+  # Clean up column and row names for a clean display
+  rownames(drug_candidates) <- NULL
+  colnames(drug_candidates) <- c("Compound name", "Compound ID", "Increase gene expression", "Decrease gene expression", "Affected Hub Genes Count")
+  
+  # Print the final, ranked table to the console
+  print(drug_candidates)
+  
+} else {
+  cat("No chemical-gene expression interactions were found for the provided hub genes.\n")
+}
+
+# Save the results to a CSV file
+write.csv(drug_candidates, "Candidate_Drug_Interactions.csv", row.names = FALSE)
+
+```
 
 
 
