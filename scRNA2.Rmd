@@ -1,0 +1,365 @@
+---
+title: "scRNA Analysis"
+author: "Deniz Ertuğrul"
+date: "2025-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dpi = 300, fig.width = 10, fig.height = 8, warning = FALSE, message = FALSE)
+```
+
+
+# Single Cell RNA-seq Analysis of GSE169471 Dataset for PAH
+
+This script is a streamlined workflow for Seurat analysis. It includes:
+1. Data loading and setup.
+
+2. Quality control and filtering.
+
+3. Normalization, scaling, and dimensionality reduction.
+
+4. Cell type annotation using SingleR.
+
+5. Visualization of key results and marker genes.
+
+
+## Load necessary libraries
+
+This first code chunk prepares the R environment for analysis. It checks for, installs (if missing), and loads all the required packages from CRAN and Bioconductor. This ensures that all functions needed for data manipulation (dplyr), visualization (ggplot2, RColorBrewer), and scRNA-seq analysis (Seurat, SingleR) are available.
+
+```{r Library Setup, message=FALSE, warning=FALSE}
+
+# This block ensures all necessary packages are installed and loaded.
+cat("Loading libraries...\n")
+
+# For CRAN packages
+packages_to_install <- c("Seurat", "dplyr", "patchwork", "GEOquery", "ggplot2")
+for (pkg in packages_to_install) {
+  if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+}
+
+# For Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+bioc_packages_to_install <- c("SingleR", "celldex", "hdf5r")
+for (pkg in bioc_packages_to_install) {
+  if (!requireNamespace(pkg, quietly = TRUE)) BiocManager::install(pkg)
+}
+
+if (!requireNamespace("RColorBrewer", quietly = TRUE)) install.packages("RColorBrewer")
+
+# Load all the libraries for the session
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(GEOquery)
+library(SingleR)
+library(celldex)
+library(ggplot2)
+library(RColorBrewer)
+
+```
+
+
+## Download and Load Data
+
+This chunk handles the retrieval and loading of the raw single-cell data. It automates the process by first downloading the supplementary files for the specified Gene Expression Omnibus (GEO) ID, GSE169471. It then unpacks the compressed .tar file and loads the count matrices from the individual .h5 files (one for each sample) into separate Seurat objects. Finally, these objects are merged into a single, unified Seurat object for cohesive analysis.
+
+
+```{r Data Download and Loading}
+# Define key variables
+GEO_ID <- "GSE169471"
+SAMPLES <- c("GSM5206779", "GSM5206780", "GSM5206781")
+DATA_DIR <- "scRNA_data"
+PLOT_DIR <- file.path(DATA_DIR, "plots")
+
+# Create directories if they don't exist
+if (!dir.exists(DATA_DIR)) dir.create(DATA_DIR)
+if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR)
+
+# Download and unpack data from GEO
+cat("Downloading supplementary data from GEO:", GEO_ID, "...\n")
+tar_file <- file.path(DATA_DIR, paste0(GEO_ID, "_RAW.tar"))
+if (!file.exists(tar_file)) {
+  getGEOSuppFiles(GEO_ID, makeDirectory = FALSE, baseDir = DATA_DIR)
+}
+cat("Unpacking data files...\n")
+untar(tar_file, exdir = DATA_DIR)
+
+# Load data into a list of Seurat objects
+seurat_objects <- lapply(SAMPLES, function(sample_id) {
+  h5_file_path <- list.files(DATA_DIR, pattern = paste0(sample_id, ".*\\.h5$"), full.names = TRUE)
+  if (length(h5_file_path) == 1) {
+    cat("Loading data for sample:", sample_id, "\n")
+    counts <- Read10X_h5(filename = h5_file_path)
+    CreateSeuratObject(counts = counts, project = sample_id)
+  } else {
+    warning(paste("Could not find a unique .h5 file for sample:", sample_id)); NULL
+  }
+})
+seurat_objects <- Filter(Negate(is.null), seurat_objects)
+
+# Merge into a single Seurat object
+cat("Merging Seurat objects...\n")
+if (length(seurat_objects) > 1) {
+  pah_seurat <- merge(x = seurat_objects[[1]], y = seurat_objects[2:length(seurat_objects)], project = "PAH_Project")
+} else {
+  pah_seurat <- seurat_objects[[1]]
+}
+
+print(pah_seurat)
+```
+
+
+## Quality Control and Preprocessing
+
+Before analysis, it is crucial to remove low-quality cells to prevent technical noise from skewing the results. This chunk performs standard QC by first calculating the percentage of mitochondrial genes for each cell—a common indicator of cellular stress or damage. We then visualize the distributions of key metrics (number of genes, total RNA counts, and mitochondrial percentage) both before and after applying filters. Cells with too few genes (potential empty droplets) or too high a mitochondrial percentage are discarded, resulting in a cleaner dataset for downstream analysis.
+
+
+```{r Quality Control (QC) and Filtering, warning=FALSE}
+cat("Starting Quality Control...\n")
+pah_seurat[["percent.mt"]] <- PercentageFeatureSet(pah_seurat, pattern = "^MT-")
+
+# Visualize QC metrics BEFORE filtering
+cat("Displaying QC metrics before filtering...\n")
+qc_plot_before <- VlnPlot(pah_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+print(qc_plot_before)
+ggsave(file.path(PLOT_DIR, "QC_Metrics_Unfiltered.png"), plot = qc_plot_before, width = 12, height = 6)
+
+# Filter out low-quality cells based on standard thresholds
+cat("Subsetting the data based on QC metrics...\n")
+pah_filtered <- subset(pah_seurat, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+cat("Data dimensions after filtering:\n")
+print(pah_filtered)
+
+# Visualize QC metrics AFTER filtering
+qc_plot_after <- VlnPlot(pah_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+print(qc_plot_after)
+ggsave(file.path(PLOT_DIR, "QC_Metrics_Filtered.png"), plot = qc_plot_after, width = 12, height = 6)
+```
+
+
+## Data Normalization, Scaling
+
+This chunk executes a core series of Seurat operations to process the filtered data. The steps are:
+1.  **JoinLayers**: A technical step for Seurat v5 to ensure consistent performance on merged objects.
+2.  **Normalization**: Adjusts for differences in sequencing depth between cells, allowing for more accurate comparison.
+3.  **Feature Selection**: Identifies the 2,000 most variable genes, which are most likely to be biologically significant and are used to reduce computational complexity.
+4.  **Scaling**: Standardizes the expression of these variable genes so that highly expressed genes do not dominate the analysis.
+5.  **PCA**: Performs linear dimensionality reduction to capture the main axes of variation in the data. An `ElbowPlot` is used to help determine the optimal number of principal components (PCs) to use.
+6.  **Clustering & UMAP**: Finally, we use the selected PCs to build a nearest-neighbor graph, partition the cells into clusters, and generate a UMAP projection for 2D visualization.
+
+
+```{r Data Normalization, Scaling}
+
+cat("Starting integrated data processing workflow...\n")
+
+# IMPORTANT: Join layers to fix performance issues with merged Seurat v5 objects.
+pah_filtered <- JoinLayers(pah_filtered)
+
+# Normalization
+cat("Normalizing data...\n")
+pah_filtered <- NormalizeData(pah_filtered)
+
+# Feature Selection
+cat("Finding highly variable features...\n")
+pah_filtered <- FindVariableFeatures(pah_filtered, selection.method = "vst", nfeatures = 2000)
+
+# Scaling - BEST PRACTICE: Scale data on variable features only.
+cat("Scaling data...\n")
+pah_filtered <- ScaleData(pah_filtered, features = VariableFeatures(object = pah_filtered))
+
+# Linear Dimensionality Reduction (PCA)
+cat("Running PCA...\n")
+pah_filtered <- RunPCA(pah_filtered, features = VariableFeatures(object = pah_filtered))
+cat("Visualizing PCA results...\n")
+pca_plot <- DimPlot(pah_filtered, reduction = "pca")
+print(pca_plot)
+ggsave(file.path(PLOT_DIR, "PCA.png"), plot = pca_plot, width = 8, height = 6)
+
+# Determine significant PCs for downstream analysis
+elbow_plot <- ElbowPlot(pah_filtered, 
+          ndims = 40)
+print(elbow_plot)
+ggsave(file.path(PLOT_DIR, "PCA_ElbowPlot.png"), plot = elbow_plot, width = 8, height = 6)
+
+# Non-linear Dimensionality Reduction (UMAP) and Clustering
+# We use the same number of PCs for UMAP, Neighbors, and Clustering (e.g., 15)
+dims_to_use <- 1:15
+#cat(paste("Using dimensions", dims_to_use, "for UMAP and clustering...\n"))
+
+pah_filtered <- RunUMAP(pah_filtered, dims = dims_to_use)
+pah_filtered <- FindNeighbors(pah_filtered, dims = dims_to_use)
+pah_filtered <- FindClusters(pah_filtered, resolution = 0.5)
+
+cat("Processing complete.\n")
+```
+
+
+## Cell Type Annotation with SingleR
+
+With the cells grouped into clusters, the next step is to assign a biological identity to each cluster. This chunk uses the SingleR package, which automates cell type annotation by comparing the gene expression profile of each cell in our dataset against a well-annotated reference atlas (HumanPrimaryCellAtlasData). The resulting cell type labels are then stored in the Seurat object's metadata for later use in visualizations.
+
+
+```{r Cell Type Annotation, warning=FALSE}
+# Cell Type Annotation with SingleR (moved up to get all labels first)
+cat("Annotating clusters using SingleR (this may take a few minutes)...\n")
+sce_data <- as.SingleCellExperiment(pah_filtered)
+hpca.ref <- celldex::HumanPrimaryCellAtlasData()
+predictions <- SingleR(test = sce_data, ref = hpca.ref, labels = hpca.ref$label.main)
+pah_filtered$singleR_labels <- predictions$labels
+
+```
+
+## UMAP Visualization
+
+This section is dedicated to creating high-quality visualizations of the UMAP projection. Two distinct plots are generated:
+1.  **Cluster-Based UMAP**: Displays the cells colored by their Seurat cluster number. This helps visualize the structure and separation of the computationally-defined groups.
+2.  **Annotation-Based UMAP**: Shows the same cells but colored by their assigned `SingleR` cell type labels. This plot is essential for interpreting the biological meaning of each cluster.
+
+The code includes logic to create a consistent and visually appealing color palette, ensuring that both plots are easy to compare and understand.
+
+
+```{r Umap Visualization, fig.width=10, fig.height=10, dpi=300}
+# Load necessary libraries (assuming you've done this already, e.g., library(dplyr), library(Seurat), library(ggplot2), library(RColorBrewer))
+# Assuming pah_filtered, PLOT_DIR, DimPlot are defined and accessible
+
+# Create a mapping between original clusters and their most common SingleR label
+cluster_to_celltype <- pah_filtered@meta.data %>%
+    group_by(seurat_clusters = Idents(pah_filtered), singleR_labels) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    group_by(seurat_clusters) %>%
+    slice_max(count, n = 1) %>%
+    select(seurat_clusters, singleR_labels)
+
+# Create a consistent color palette based on unique cell types
+unique_cell_types <- unique(cluster_to_celltype$singleR_labels)
+n_cell_types <- length(unique_cell_types)
+
+if (n_cell_types <= 12) {
+    cell_type_colors <- brewer.pal(min(n_cell_types, 12), "Paired")
+} else {
+    color_palette <- colorRampPalette(brewer.pal(12, "Paired"))
+    cell_type_colors <- color_palette(n_cell_types)
+}
+
+# Create named color vector for cell types
+names(cell_type_colors) <- unique_cell_types
+
+# Map cluster colors based on their corresponding cell types
+cluster_colors <- cell_type_colors[cluster_to_celltype$singleR_labels]
+names(cluster_colors) <- as.character(cluster_to_celltype$seurat_clusters)
+
+# Define standard ggsave parameters for consistent output
+STANDARD_WIDTH <- 15
+STANDARD_HEIGHT <- 15 # Increased height to account for bottom legend while maintaining square plot area
+STANDARD_DPI <- 300
+
+
+# Create the first UMAP plot with cluster numbers but cell-type-based colors
+umap_plot <- DimPlot(pah_filtered, reduction = "umap", label = TRUE, pt.size = 0.7) +
+    scale_color_manual(values = cluster_colors) +
+    labs(
+        title = "Cell Type Annotation of PAH Dataset",
+        subtitle = "UMAP Projection - Seurat Clusters",
+        color = "Seurat Clusters"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10, face = "bold"),
+        aspect.ratio = 1
+    ) +
+    guides(
+        color = guide_legend(
+            override.aes = list(size = 8, alpha = 1, stroke = 0),
+            nrow = 3
+        )
+    )
+
+# Force consistent geom parameters
+umap_plot$layers[[1]]$aes_params$alpha <- 1
+umap_plot$layers[[1]]$aes_params$stroke <- 0
+
+print(umap_plot)
+ggsave(file.path(PLOT_DIR, "UMAP_Clusters.png"), plot = umap_plot, width = STANDARD_WIDTH, height = STANDARD_HEIGHT, dpi = STANDARD_DPI)
+
+# Create the second UMAP plot with cell type labels using the same colors
+annotated_umap_plot_final <- DimPlot(
+    pah_filtered,
+    reduction = "umap",
+    group.by = "singleR_labels",
+    label = TRUE,
+    repel = TRUE,
+    label.size = 5,
+    pt.size = 0.7
+) +
+    scale_color_manual(values = cell_type_colors) +
+    labs(
+        title = "Cell Type Annotation of PAH Dataset",
+        subtitle = "UMAP Projection - Cell Type Labels",
+        color = "Annotated Cell Type"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10, face = "bold"),
+        aspect.ratio = 1
+    ) +
+    guides(
+        color = guide_legend(
+            override.aes = list(size = 8, alpha = 1, stroke = 0),
+            nrow = 3
+        )
+    )
+
+# Force identical geom parameters as the first plot
+annotated_umap_plot_final$layers[[1]]$aes_params$alpha <- 1
+annotated_umap_plot_final$layers[[1]]$aes_params$stroke <- 0
+
+print(annotated_umap_plot_final)
+
+# Save the final plot
+ggsave(
+    file.path(PLOT_DIR, "UMAP_Annotated_Optimized_Legend.png"),
+    plot = annotated_umap_plot_final,
+    width = STANDARD_WIDTH,
+    height = STANDARD_HEIGHT,
+    dpi = STANDARD_DPI
+)
+```
+
+
+## Visualization of Key Hub Genes
+
+As a final validation step, this chunk visualizes the expression of 10 key hub genes that were identified as significant in the original publication. We generate two types of plots:
+1.  **Feature Plots**: Overlay the expression level of each gene onto the UMAP plot. This shows the spatial distribution of gene expression and helps identify which cell clusters are defined by these markers.
+2.  **Violin Plots**: Display the expression distribution of each gene across the different annotated cell types, providing a more quantitative comparison.
+
+This step is crucial for confirming whether our analysis recapitulates the key biological findings of the source paper.
+
+
+```{r Hub Gene Expression Visualization, fig.width=18, fig.height=18, dpi=300, warning=FALSE}
+# Define hub genes identified in the paper (from abstract and Table 1)
+hub_genes <- c("POSTN", "OGN", "ASPN", "S100A12", "LCN2", "SPP1", "S100A9", "CD163", "S100A8", "AQP9")
+
+cat("Generating FeaturePlots for key hub genes...\n")
+feature_plot <- FeaturePlot(pah_filtered, features = hub_genes, reduction = "umap", ncol = 4)
+print(feature_plot)
+ggsave(file.path(PLOT_DIR, "HubGenes_FeaturePlot.png"), plot = feature_plot, width = 16, height = 12)
+
+cat("Generating VlnPlots for key hub genes...\n")
+vln_plot <- VlnPlot(pah_filtered, features = hub_genes, group.by = "singleR_labels", pt.size = 0, ncol = 2) + NoLegend()
+print(vln_plot)
+ggsave(file.path(PLOT_DIR, "HubGenes_VlnPlot.png"), plot = vln_plot, width = 12, height = 20)
+
+cat("Analysis script finished successfully!\n")
+```
+
