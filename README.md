@@ -1,11 +1,4 @@
-Of course, here is a README file for the provided script.
-
----
-
 # Replication of Pulmonary Arterial Hypertension (PAH) GEO Data Analysis
-
-**Author:** Deniz Ertuğrul
-**Date:** 2025-09-21
 
 ## Project Overview
 
