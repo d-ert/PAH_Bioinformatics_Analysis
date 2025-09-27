@@ -10,8 +10,8 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 # Libraries
+
 ```{r Libraries, warning=FALSE, message=FALSE}
 library(dplyr)
 library(GEOquery)
@@ -102,7 +102,6 @@ We need a column that clearly identifies "PAH" vs "Normal" and a column for the 
 head(pheno_1)
 ```
 
-
 ```{r Clean Phenotype Data}
 # For GSE117261
 pheno_1_clean <- pheno_1 %>%
@@ -145,7 +144,6 @@ head(pheno_2_clean)
 ```
 
 Now we can merge the harmonized data into single objects.
-
 
 ```{r Combine Data and Annotate Genes }
 
@@ -195,7 +193,6 @@ cat("Final dimensions of combined expression matrix:", dim(combined_expr), "\n")
 cat("Final dimensions of combined phenotype data:", dim(combined_pheno), "\n")
 
 ```
-
 
 ## Visualize the Batch Effect (Before Correction)
 
@@ -327,7 +324,7 @@ volcano_plot +
 
 # 1. Get the expression data for only the significant DEGs
 # The 'top_genes' object from the previous step already contains our DEGs
-deg_expr_matrix <- combat_expr[rownames(top_genes), ]
+deg_expr_matrix <- combat_expr[rownames(top_genes), ]|||||
 
 # 2. Create an annotation data frame for the columns (samples)
 # This tells pheatmap which samples belong to which group
@@ -350,16 +347,9 @@ pheatmap(deg_expr_matrix,
 )
 ```
 
-
 # Weighted Gene Co-expression Network Analysis (WGCNA)
 
-The goal is to find modules of co-expressed genes. 
-- the WGCNA workflow: 
-1. **Input data preparation:** Select the top 25% most variable genes. 
-2. **Soft-thresholding power selection:** To achieve a scale-free topology. 
-3. **Network construction:** Create a topological overlap matrix (TOM). 
-4. **Module detection:** Identify gene modules using hierarchical clustering. 
-5. **Relate modules to traits:** Correlate module eigengenes with the disease state (PAH vs. normal).
+The goal is to find modules of co-expressed genes. - the WGCNA workflow: 1. **Input data preparation:** Select the top 25% most variable genes. 2. **Soft-thresholding power selection:** To achieve a scale-free topology. 3. **Network construction:** Create a topological overlap matrix (TOM). 4. **Module detection:** Identify gene modules using hierarchical clustering. 5. **Relate modules to traits:** Correlate module eigengenes with the disease state (PAH vs. normal).
 
 ## Data Prep
 
@@ -408,8 +398,6 @@ keepSamples <- (clust != 0)
 datExpr <- datExpr[keepSamples, ]
 
 ```
-
-
 
 ## Soft-Thresholding Power Selection
 
@@ -480,117 +468,6 @@ plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
                     addGuide = TRUE, guideHang = 0.05)
 
 ```
-
-
-# BOZUK Module Preservation and Robustness Analysis
-
-Şu an bozuk burası
-
-
-```{r}
-## The goal is to test if the modules discovered are robust and reproducible.
-## We will split the data into two random halves: a 'discovery' set and a 'test' set.
-## We then check if the modules found in the discovery set are preserved in the test set.
-#
-#conflicts_prefer(base::setdiff)
-#
-##
-## --- NEW CHUNK: MODULE PRESERVATION AND ROBUSTNESS ANALYSIS (REVISED) ---
-##
-#
-## For reproducibility of the random split
-#set.seed(123)
-#
-## --- 1. Create two random subsets of the data ---
-#n_samples <- nrow(datExpr)
-#discovery_indices <- sample(1:n_samples, size = round(n_samples / 2))
-#test_indices <- setdiff(1:n_samples, discovery_indices)
-#
-#discovery_data <- datExpr[discovery_indices, ]
-#test_data <- datExpr[test_indices, ]
-#
-## --- 2. IMPORTANT: Check for and remove zero-variance genes in each subset ---
-## Splitting the data can sometimes result in genes with no variance in one of the subsets.
-## WGCNA requires genes to have some variance to be analyzed.
-#discovery_data <- discovery_data[, apply(discovery_data, 2, var) > 0]
-#test_data <- test_data[, apply(test_data, 2, var) > 0]
-#
-## Ensure the gene lists are identical between the two sets after cleaning
-#common_genes_split <- intersect(colnames(discovery_data), colnames(test_data))
-#discovery_data <- discovery_data[, common_genes_split]
-#test_data <- test_data[, common_genes_split]
-#
-#cat("Dimensions of discovery data:", dim(discovery_data), "\n")
-#cat("Dimensions of test data:", dim(test_data), "\n")
-#
-#
-## --- 3. Run WGCNA on the discovery set to get reference modules ---
-#net_discovery <- blockwiseModules(
-#  discovery_data,
-#  power = chosen_power,
-#  TOMType = "signed",
-#  minModuleSize = 30,  # Increased minModuleSize slightly for robustness in smaller dataset
-#  mergeCutHeight = 0.4,
-#  numericLabels = TRUE,
-#  verbose = 2
-#)
-#
-## --- 4. CRITICAL CHECK: Verify that modules were actually found ---
-#discovery_colors <- net_discovery$colors
-#cat("\n--- Modules found in the discovery set: ---\n")
-#print(table(discovery_colors))
-#
-## Check if there are any modules other than the grey module (0)
-#if (length(unique(discovery_colors)) <= 1) {
-#  stop("Error: No modules were detected in the discovery dataset (all genes are grey).
-#       Cannot proceed with module preservation analysis.
-#       Consider using a larger dataset or adjusting WGCNA parameters.")
-#}
-#
-#
-## --- 5. Run the Module Preservation Analysis ---
-#setLabels <- c("Discovery", "Test")
-#multiExpr <- list(Discovery = list(data = discovery_data), Test = list(data = test_data))
-#multiColor <- list(Discovery = discovery_colors)
-#
-#mp <- modulePreservation(
-#  multiData = multiExpr,
-#  multiColor = multiColor,
-#  referenceNetworks = 1,
-#  nPermutations = 100, # Using 200 is more robust
-#  randomSeed = 1,
-#  quickCor = 0,
-#  verbose = 3
-#)
-#
-## --- 6. Process and Visualize the Results ---
-#stats <- mp$preservation$Z$ref.Discovery$inColumns.Test
-#stats_summary <- stats[, c("module", "Zsummary.pres")]
-#print("\n--- Module Preservation Z-summary Scores ---")
-#print(stats_summary)
-#
-## Plot the Z-summary scores, excluding the unassigned 'gold' (grey) module
-#plot_stats <- stats[stats$module != "gold", ] # 'gold' is the label for the grey module in plots
-#
-#plot(plot_stats$moduleSize, plot_stats$Zsummary.pres,
-#     col = plot_stats$module,
-#     pch = 19,
-#     cex = 1.5,
-#     xlab = "Module Size",
-#     ylab = "Z-summary Preservation Score",
-#     main = "Module Preservation in Test Set"
-#)
-#
-## Add a horizontal line for the Z=10 and Z=2 thresholds
-#abline(h = 10, col = "blue", lty = 2)
-#abline(h = 2, col = "red", lty = 2)
-#legend("topright", legend = c("Strong Preservation (Z > 10)", "Weak Preservation (Z > 2)"),
-#       col = c("blue", "red"), lty = 2, bty = "n")
-#
-#
-```
-
-
 
 ## Relate Modules to Clinical Traits
 
@@ -666,8 +543,6 @@ draw(ht)
 #set.seed(NULL)
 ```
 
-
-
 ```{r}
 # --- Extract Most Significant Positive and Negative Module NUMBERS ---
 
@@ -693,9 +568,7 @@ cat("\n--- Most Significant Module Numbers ---\n",
     "Negative Module (highest negative correlation with PAH):", negative_module, "\n")
 ```
 
-
 ## Identify Module DEGs
-
 
 ```{r Identify MDEGs}
 degs <- rownames(top_genes)
@@ -765,9 +638,6 @@ grid.newpage()
 grid.draw(venn.plot)
 ```
 
-
-
-
 ```{r}
 #filter the final_mdeg_list to only include genes of p<0.05 and |log2FC| > 1
 
@@ -799,9 +669,6 @@ mdeg_stats <- all_genes[final_mdeg_list_filtered, ]
 mdeg_stats
 ```
 
-
-
-
 # Functional Analysis and Network Construction
 
 ## GO analysis
@@ -829,9 +696,6 @@ go_results <- enrichGO(gene = final_mdeg_list_filtered,
 
 
 ```
-
-
-
 
 ```{r}
 go_df <- as.data.frame(go_results)
@@ -875,9 +739,7 @@ p <- ggplot(top_go_combined, aes(x = negLogAdjP, y = Description, fill = ONTOLOG
 print(p)
 ```
 
-
 ## KEGG Pathway Analysis
-
 
 ```{r KEGG Enrichment Analysis, cache=TRUE}
 # 4. Perform KEGG Pathway Analysis
@@ -911,7 +773,6 @@ ggsave("KEGG_dotplot2.png", plot = p, width = 8, height = 6, dpi = 300)
 
 ```
 
-
 ```{r}
 
 #Cnetplot
@@ -921,8 +782,6 @@ ggsave("KEGG_cnetplot.png", plot = kegg4, width = 8, height = 6, dpi = 300)
 
 
 ```
-
-
 
 ## Protein-Protein Interaction (PPI) Network with STRING
 
@@ -1003,10 +862,6 @@ if (nrow(mapped_genes) > 0) {
 
 
 ```
-
-
-
-
 
 ```{r}
 
@@ -1121,8 +976,6 @@ ggsave("PPI_Community_Facet_Plot.png", width = 12, height = 8, dpi = 300)
 
 ```
 
-
-
 # Regulatory Network Construction
 
 Use the NetworkAnalyst web server to find miRNA and Transcription Factor (TF) interactions with your 10 hub genes. This step is performed on a website, not directly in R.
@@ -1141,13 +994,9 @@ knitr::include_graphics("Network Analysis2.png")
 
 ```
 
-
-
 # Immune Infiltration Analysis
 
 ```{r CIBERSORT_Libraries, message=FALSE, warning=FALSE}
-# Install if you don't have them
-# install.packages(c("pheatmap", "corrplot", "vioplot", "tidyr", "ggpubr"))
 library(corrplot)
 library(vioplot)
 library(ggpubr)
@@ -1181,16 +1030,17 @@ head(cibersort_input)
 
 ```{r Run_CIBERSORT, cache=TRUE}
 
-
-# --- Run CIBERSORT ---
-# Load the CIBERSORT source script
-source("CIBERSORT.R")
-
-# This function call might take a few minutes.
-# It uses the LM22 signature matrix for 22 immune cell types.
-# perm=100 runs 100 permutations for p-value calculation.
-results_cibersort <- CIBERSORT("LM22.txt", cibersort_input, perm = 100, QN = FALSE)
-
+#
+## --- Run CIBERSORT ---
+## Load the CIBERSORT source script
+#source("CIBERSORT.R")
+#
+## This function call might take a few minutes.
+## It uses the LM22 signature matrix for 22 immune cell types.
+## perm=100 runs 100 permutations for p-value calculation.
+#results_cibersort <- CIBERSORT("LM22.txt", cibersort_input, perm = 100, QN = FALSE)
+#
+#
 
 ```
 
@@ -1212,7 +1062,6 @@ immune_proportions <- results_cibersort_filtered[, 1:22]
 head(immune_proportions)
 ```
 
-
 ## Visualize CIBERSORT Results
 
 ```{r}
@@ -1226,8 +1075,10 @@ conflicts_prefer(pheatmap::pheatmap)
 
 ```
 
-```{r Visualize_CIBERSORT_Results}
-# --- Figure 5A: Bar Plot of Relative Percentages ---
+### Bar Plot of Relative Percentages
+
+```{r Bar Plot of Relative Percentages}
+
 # Prepare data for ggplot
 immune_proportions_long <- immune_proportions %>%
   as.data.frame() %>%
@@ -1238,7 +1089,7 @@ immune_proportions_long <- immune_proportions %>%
 immune_proportions_long <- merge(immune_proportions_long, combined_pheno, by.x = "Sample", by.y = "row.names")
 
 
-ggplot(immune_proportions_long, aes(x = Sample, y = Proportion, fill = CellType)) +
+cell_proportions <- ggplot(immune_proportions_long, aes(x = Sample, y = Proportion, fill = CellType)) +
   geom_bar(stat = "identity", position = "stack") +
   facet_wrap(~ group, scales = "free_x", nrow = 1) +
   theme_bw() +
@@ -1247,17 +1098,17 @@ ggplot(immune_proportions_long, aes(x = Sample, y = Proportion, fill = CellType)
         legend.position = "bottom") +
   labs(title = "Relative Proportions of 22 Immune Cell Types", x = "Samples", y = "Proportion")
 
-
-# --- Figure 5B: Heatmap of Immune Cells ---
-pheatmap(t(immune_proportions),
-         main = "Heatmap of Immune Cell Infiltration",
-         annotation_col = data.frame(Group = combined_pheno$group, row.names = rownames(combined_pheno)),
-         show_colnames = FALSE,
-         scale = "row")
+# save the plot as png
+ggsave("cibersort_results/plots/Relative Proportions of 22 Immune Cell Types.png", plot = cell_proportions, width = 8, height = 6, dpi = 300)
 
 
-# --- Figure 6A: Violin Plots Comparing Groups ---
-ggplot(immune_proportions_long, aes(x = group, y = Proportion, fill = group)) +
+```
+
+### Violin Plots Comparing Groups
+
+```{r Violin Plots Comparing Groups}
+
+violin_plot <- ggplot(immune_proportions_long, aes(x = group, y = Proportion, fill = group)) +
   geom_violin() +
   geom_boxplot(width = 0.1, fill = "white") +
   facet_wrap(~ CellType, scales = "free_y", ncol = 4) +
@@ -1265,13 +1116,50 @@ ggplot(immune_proportions_long, aes(x = group, y = Proportion, fill = group)) +
   theme_bw() +
   labs(title = "Immune Cell Infiltration: PAH vs. Normal", x = "Group", y = "Estimated Proportion")
 
+#save the plot as png
+ggsave("cibersort_results/plots/Immune Cell Infiltration: PAH vs. Normal.png", plot = violin_plot, width = 8, height = 6, dpi = 300)
+```
 
-#change the prefer of cor
-# --- Figure 6B: Correlation Matrix of Immune Cells ---
-cor_matrix <- cor(immune_proportions)
+### Correlation Matrix of Immune Cells
+
+First we have to clean the data.
+
+```{r Clean Data for Correlation Matrix}
+
+# Find columns (cell types) that have zero variance (all values are the same)
+# These columns will produce NaN values in the correlation matrix
+cols_to_remove <- which(apply(immune_proportions, 2, var) == 0)
+
+# If any such columns are found, print a message and remove them
+if (length(cols_to_remove) > 0) {
+  cat("Removing the following cell types with zero variance across all samples:\n")
+  cat(paste(names(cols_to_remove), collapse = "\n"), "\n")
+  
+  # Create a new data frame without the problematic columns
+  immune_proportions_filtered <- immune_proportions[, -cols_to_remove]
+} else {
+  # If no columns have zero variance, use the original data frame
+  immune_proportions_filtered <- immune_proportions
+}
+
+```
+
+```{r Correlation Matrix of Immune Cells}
+# Now, calculate the correlation matrix on the filtered data
+cor_matrix <- stats::cor(immune_proportions_filtered)
+
+# 1. Define the output file and start the PNG graphics device
+png("cibersort_results/plots/Correlation Matrix of Immune Cell Subtypes.png", 
+    width = 8, 
+    height = 8, 
+    units = "in", 
+    res = 300)
+
+# 2. Re-run the corrplot function to draw the plot to the open PNG device
+#    Note: Do not assign the result to a variable like 'cor_plot' if you don't need the reordered matrix.
 corrplot(cor_matrix,
          method = "color",
-         type = "upper",
+         type = "lower",
          order = "hclust",
          tl.col = "black",
          tl.srt = 45,
@@ -1279,143 +1167,50 @@ corrplot(cor_matrix,
          number.cex = 0.5,
          main = "Correlation Matrix of Immune Cell Subtypes")
 
+# 3. Close the PNG device to finalize and save the file
+dev.off()
+         
 ```
 
+### Heatmap of Immune Cells
 
+```{r Heatmap of Immune Cells}
+
+# We will use the 'immune_proportions_filtered' data frame that we created earlier,
+# which has the cell types with zero variance already removed.
+# This ensures that the scaling and clustering steps will work correctly.
+
+# The 'annotation_col' needs to match the columns of the heatmap input.
+# The columns of t(immune_proportions_filtered) are the sample names,
+# so we need to make sure our annotation data frame has the same samples.
+# The samples in immune_proportions_filtered are a subset of combined_pheno,
+# so we filter combined_pheno to match.
+
+annotation_data <- combined_pheno[rownames(immune_proportions_filtered), , drop = FALSE]
+
+heat_map <- pheatmap(
+  t(immune_proportions_filtered), # Use the filtered data
+  main = "Heatmap of Immune Cell Infiltration",
+  annotation_col = data.frame(Group = annotation_data$group, row.names = rownames(annotation_data)),
+  show_colnames = FALSE,
+  scale = "row" # This will now work without error
+)
+
+ggsave("cibersort_results/plots/Heatmap of Immune Cells.png", plot = heat_map, width = 8, height = 6, dpi = 300)
+
+```
 
 # Single-Cell Data Analysis
 
-This section replicates Figure 7 from the paper using Seurat. 
-
-```{r scRNA_Setup, message=FALSE, warning=FALSE}
-# Install Seurat
-if (!requireNamespace("Seurat", quietly = TRUE)) {
-  install.packages("Seurat")
-}
-library(Seurat)
-
-# Install SingleR
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-if (!requireNamespace("SingleR", quietly = TRUE)) {
-  BiocManager::install("SingleR")
-}
-library(SingleR)
-
-# Install CellChat
-if (!requireNamespace("remotes", quietly = TRUE)) {
-  install.packages("remotes")
-}
-if (!requireNamespace("CellChat", quietly = TRUE)) {
-  devtools::install_github("jinworks/CellChat")
-}
-library(CellChat)
-```
-
-## Download and Process scRNA-seq Data
-```{r scRNA_Data_Download_and_Load, cache=TRUE}
-
-# Create a directory to store the files
-if (!dir.exists("GSE169471_RAW")) {
-  dir.create("GSE169471_RAW")
-}
-getGEOSuppFiles("GSE169471", makeDirectory = TRUE, baseDir = ".")
-
-# Unzip the main tar file
-untar("GSE169471/GSE169471_RAW.tar", exdir = "GSE169471_RAW")
-
-# Load the data for the three specified samples
-# The file paths might need adjustment depending on the extracted folder structure
-data_gsm1 <- Read10X(data.dir = "GSE169471_RAW/GSM5206779_PAH_P1_filtered_feature_bc_matrix/")
-data_gsm2 <- Read10X(data.dir = "GSE169471_RAW/GSM5206780_PAH_P2_filtered_feature_bc_matrix/")
-data_gsm3 <- Read10X(data.dir = "GSE169471_RAW/GSM5206781_PAH_P3_filtered_feature_bc_matrix/")
-
-# Create Seurat objects
-seurat_gsm1 <- CreateSeuratObject(counts = data_gsm1, project = "GSM5206779", min.cells = 3, min.features = 200)
-seurat_gsm2 <- CreateSeuratObject(counts = data_gsm2, project = "GSM5206780", min.cells = 3, min.features = 200)
-seurat_gsm3 <- CreateSeuratObject(counts = data_gsm3, project = "GSM5206781", min.cells = 3, min.features = 200)
-
-# Merge them into one object
-merged_seurat <- merge(seurat_gsm1, y = c(seurat_gsm2, seurat_gsm3), add.cell.ids = c("GSM1", "GSM2", "GSM3"))
-```
-
-
-## Standard Pre-processing and Clustering
-```{r scRNA_Processing, cache=TRUE}
-# --- Standard Seurat Pre-processing Workflow ---
-# 1. Quality Control
-merged_seurat[["percent.mt"]] <- PercentageFeatureSet(merged_seurat, pattern = "^MT-")
-merged_seurat <- subset(merged_seurat, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 15)
-
-# 2. Normalize and find variable features
-merged_seurat <- NormalizeData(merged_seurat)
-merged_seurat <- FindVariableFeatures(merged_seurat, selection.method = "vst", nfeatures = 2000)
-
-# 3. Scale data and run PCA
-all.genes <- rownames(merged_seurat)
-merged_seurat <- ScaleData(merged_seurat, features = all.genes)
-merged_seurat <- RunPCA(merged_seurat, features = VariableFeatures(object = merged_seurat))
-
-# 4. Clustering
-merged_seurat <- FindNeighbors(merged_seurat, dims = 1:15)
-merged_seurat <- FindClusters(merged_seurat, resolution = 0.5)
-
-# 5. Run t-SNE for visualization
-merged_seurat <- RunTSNE(merged_seurat, dims = 1:15)
-```
-
-
-## Visualize Clusters and Key Marker Genes
-```{r scRNA_Visualization}
-# --- Replicating Figure 7 ---
-
-# Figure 7A: t-SNE plot by sample identity
-DimPlot(merged_seurat, reduction = "tsne", group.by = "orig.ident", pt.size = 0.5) + labs(title="t-SNE by Sample")
-
-# Figure 7B: t-SNE plot of clusters
-DimPlot(merged_seurat, reduction = "tsne", label = TRUE, pt.size = 0.5) + NoLegend() + labs(title="t-SNE by Cluster")
-
-# Figure 7C: Cell-type annotations (Requires SingleR or manual annotation)
-# This is an advanced step. We'll use SingleR for automated annotation.
-library(SingleR)
-library(celldex)
-hpca.se <- HumanPrimaryCellAtlasData()
-
-# Run annotation
-pred <- SingleR(test = GetAssayData(merged_seurat, slot = "data"), ref = hpca.se, labels = hpca.se$label.main)
-
-# Add annotations to Seurat object
-merged_seurat$cell_type <- pred$labels[match(rownames(merged_seurat@meta.data), rownames(pred))]
-DimPlot(merged_seurat, reduction = "tsne", group.by = "cell_type", label = TRUE, repel = TRUE, pt.size = 0.5) + labs(title="t-SNE by Inferred Cell Type")
-
-
-# Figure 7F: Expression patterns of key marker genes (your hub genes!)
-# Use the hub genes you identified earlier
-FeaturePlot(merged_seurat,
-            features = hub_gene_symbols,
-            reduction = "tsne",
-            pt.size = 0.5,
-            order = TRUE)
-
-VlnPlot(merged_seurat, features = hub_gene_symbols, group.by = "cell_type", pt.size = 0)
-```
-
-
-
-
-
-
-
+This section replicates Figure 7 from the paper using Seurat. Wrote a different script for this section.
 
 # Candidate Drug Screening
 
 This section uses the API call for Comparative Toxicogenomic Database (CTD). The 10 identified hub genes were imported into CTD and screened for compounds that could reduce the functional effects of these hub genes. Specifically, compounds that could either reduce the expression of overexpressed genes in PAH patients or increase the expression of underexpressed genes were identified, serving as potential targeted drugs for PAH.
 
-
 ```{r}
 # Install and load necessary packages
-if (!requireNamespace("httr", quietly = TRUE)) {
+  if (!requireNamespace("httr", quietly = TRUE)) {
   install.packages("httr")
 }
 if (!requireNamespace("jsonlite", quietly = TRUE)) {
@@ -1426,9 +1221,6 @@ conflicts_prefer(httr::content)
 
 library(jsonlite)
 ```
-
-
-
 
 ```{r}
 # 2. Prepare to collect the data
@@ -1524,11 +1316,3 @@ if (nrow(all_interactions) > 0) {
 write.csv(drug_candidates, "Candidate_Drug_Interactions.csv", row.names = FALSE)
 
 ```
-
-
-
-
-
-
-
-
