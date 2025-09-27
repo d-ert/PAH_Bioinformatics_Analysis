@@ -8,6 +8,8 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.path = "plots/")
+
 ```
 
 # Libraries
@@ -203,7 +205,7 @@ pca_before_df <- as.data.frame(pca_before$x)
 pca_before_df <- cbind(pca_before_df, combined_pheno)
 
 # Plot PCA
-ggplot(pca_before_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
+plot_pca_before <- ggplot(pca_before_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
   geom_point(size = 3) +
   ggtitle("PCA Before Batch Effect Correction") +
   theme_bw() +
@@ -212,7 +214,10 @@ ggplot(pca_before_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
     y = paste0("PC2: ", round(summary(pca_before)$importance[2,2]*100, 1), "% variance")
   )
 
+#Save the before PCA
+ggsave("plots/PCA_Before.png", plot = plot_pca_before, width = 8, height = 6, dpi = 300)
 
+print(plot_pca_before)
 ```
 
 ## Correct for Batch Effects using ComBat
@@ -244,7 +249,7 @@ pca_after_df <- as.data.frame(pca_after$x)
 pca_after_df <- cbind(pca_after_df, combined_pheno)
 
 # Plot PCA
-ggplot(pca_after_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
+plot_pca_after <- ggplot(pca_after_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
   geom_point(size = 3) +
   ggtitle("PCA After Batch Effect Correction with ComBat") +
   theme_bw() +
@@ -253,6 +258,8 @@ ggplot(pca_after_df, aes(x = PC1, y = PC2, color = batch, shape = group)) +
     y = paste0("PC2: ", round(summary(pca_after)$importance[2,2]*100, 1), "% variance")
   )
 
+ggsave("plots/PCA_After.png", plot = plot_pca_after, width = 8, height = 6, dpi = 300)
+print(plot_pca_after)
 ```
 
 # Differential Gene Expression and WGCNA
@@ -315,16 +322,25 @@ volcano_plot <- ggplot(all_genes, aes(x = logFC, y = -log10(adj.P.Val), color = 
 top_labels <- subset(all_genes, adj.P.Val < 0.05 & abs(logFC) > 0.5)
 top_labels <- top_labels[order(top_labels$adj.P.Val), ][1:10, ]
 
-volcano_plot + 
+final_volcano_plot <- volcano_plot +
   geom_text_repel(data = top_labels, aes(label = rownames(top_labels)), 
                   size = 3, box.padding = 0.5, max.overlaps = Inf)
+
+# Use ggsave to save the plot
+ggsave("plots/Volcano Plot of DEGs.png", # The name and format of the file
+       plot = final_volcano_plot,      # The plot object to save
+       width = 8,                      # Width in inches
+       height = 6,                     # Height in inches
+       dpi = 300)                      # Resolution (Dots Per Inch) for quality
+
+print(final_volcano_plot)
 
 # --- Part 2: Create the Heatmap with pheatmap ---
 
 
 # 1. Get the expression data for only the significant DEGs
 # The 'top_genes' object from the previous step already contains our DEGs
-deg_expr_matrix <- combat_expr[rownames(top_genes), ]|||||
+deg_expr_matrix <- combat_expr[rownames(top_genes), ]
 
 # 2. Create an annotation data frame for the columns (samples)
 # This tells pheatmap which samples belong to which group
@@ -334,17 +350,43 @@ annotation_col <- data.frame(
 )
 
 # 3. Generate the heatmap
-pheatmap(deg_expr_matrix,
-         main = "Heatmap of Top Differentially Expressed Genes",
-         annotation_col = annotation_col,
-         scale = "row",          # This is VERY important - it scales each gene's expression to have a mean of 0 and SD of 1 (Z-score)
-         show_rownames = FALSE,  # Hides gene names, which would be too crow  ded
-         show_colnames = FALSE,  # Hides sample names for a cleaner look
-         cluster_cols = TRUE,    # Clusters the samples (columns) based on similarity
-         cluster_rows = TRUE,    # Clusters the genes (rows) based on similarity
-         treeheight_row = 0,     # Hides the row dendrogram for a cleaner look if desired
-         legend = TRUE
+png(filename = "plots/Heatmap of Top Differentially Expressed Genes.png",
+    width = 8, height = 6, units = "in", res = 300)
+
+# 2. Call pheatmap. The result (a list of plot data/parameters) is stored,
+#    but the plot is NOT yet drawn to the file.
+plot_heatmap_degs <- pheatmap(deg_expr_matrix,
+             main = "Heatmap of Top Differentially Expressed Genes",
+             annotation_col = annotation_col,
+             scale = "row",
+             show_rownames = FALSE,
+             show_colnames = FALSE,
+             cluster_cols = TRUE,
+             cluster_rows = TRUE,
+             treeheight_row = 0,
+             legend = TRUE
 )
+
+# 3. CRITICAL STEP: Explicitly print the pheatmap object.
+#    This forces the plot to be drawn to the currently open PNG file.
+print(plot_heatmap_degs)
+
+# 4. Close the graphics device. This saves the populated plot to the file.
+dev.off()
+
+# To display the plot in your R console/viewer, just run the pheatmap call again:
+pheatmap(deg_expr_matrix,
+             main = "Heatmap of Top Differentially Expressed Genes",
+             annotation_col = annotation_col,
+             scale = "row",
+             show_rownames = FALSE,
+             show_colnames = FALSE,
+             cluster_cols = TRUE,
+             cluster_rows = TRUE,
+             treeheight_row = 0,
+             legend = TRUE
+)
+
 ```
 
 # Weighted Gene Co-expression Network Analysis (WGCNA)
@@ -368,8 +410,6 @@ top_genes_wgcna <- names(sort(gene_variances, decreasing = TRUE))[1:n_top_genes]
 # Filter the expression data to include only these top genes
 datExpr <- datExpr0[, top_genes_wgcna]
 
-#TODO burdan gsg diye bişey sildin sorun olursa bak
-
 # WGCNA requires a check for genes and samples with too many missing values.
 gsg <- goodSamplesGenes(datExpr, verbose = 3)
 
@@ -382,7 +422,33 @@ if (!gsg$allOK) {
 #Check for sample outliers by clustering them
 sampleTree <- hclust(dist(datExpr), method = "average")
 
+### Saving the plot
+png(filename = "plots/sample_outlier_dendrogram.png", 
+    width = 10, 
+    height = 8, 
+    units = "in", 
+    res = 300) # Use 300 or 600 for high resolution
+
+# 2. Re-run your plotting code
+plot(sampleTree, 
+     main = "Sample clustering to detect outliers", 
+     sub="", 
+     xlab="", 
+     cex.lab = 1.5, 
+     cex.axis = 1.5, 
+     cex.main = 2)
+
+# Set the height cut-off
+cut_height <- 64
+abline(h = cut_height, col = "red", lty = 2)
+
+# 3. Close the device to save the file
+dev.off() 
+
+### Plotting the plot in notebook
 plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+
+
 
 # Set the height cut-off
 cut_height <- 64
@@ -409,6 +475,36 @@ powers <- c(c(1:10), seq(from = 12, to = 20, by = 2))
 # Call the network topology analysis function
 sft <- pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
 
+png(filename = "plots/power_selection_plots.png", 
+    width = 10, 
+    height = 5, 
+    units = "in", 
+    res = 300) # Use a good resolution (e.g., 300)
+
+### Saving the plot
+# Plot the results to help us choose the power
+par(mfrow = c(1, 2))
+cex1 <- 0.9
+
+# --- Plot 1: Scale-free topology fit index ---
+plot(sft$fitIndices[, 1], -sign(sft$fitIndices[, 3]) * sft$fitIndices[, 2],
+     xlab = "Soft Threshold (power)", ylab = "Scale Free Topology Model Fit, signed R^2",
+     type = "n", main = "Scale independence")
+text(sft$fitIndices[, 1], -sign(sft$fitIndices[, 3]) * sft$fitIndices[, 2],
+     labels = powers, cex = cex1, col = "red")
+# Add a horizontal line at the recommended R^2 cutoff of 0.85
+abline(h = 0.85, col = "red")
+
+# --- Plot 2: Mean connectivity ---
+plot(sft$fitIndices[, 1], sft$fitIndices[, 5],
+     xlab = "Soft Threshold (power)", ylab = "Mean Connectivity", type = "n",
+     main = "Mean connectivity")
+text(sft$fitIndices[, 1], sft$fitIndices[, 5], labels = powers, cex = cex1, col = "red")
+
+# 3. Close the device to save the file
+dev.off() 
+
+### Plotting the plot in notebook
 # Plot the results to help us choose the power
 par(mfrow = c(1, 2))
 cex1 <- 0.9
@@ -442,8 +538,7 @@ chosen_power <- 6
 # We will use the one-step blockwiseModules function.
 
 #set.seed(42)
-options(cor = WGCNA::cor)
-
+conflicts_prefer(WGCNA::cor)
 net <- blockwiseModules(
   datExpr,
   power = chosen_power,
@@ -461,12 +556,26 @@ net <- blockwiseModules(
 table(net$colors)
 # Convert the numeric labels to colors
 mergedColors <- labels2colors(net$colors)
+
+png(filename = "plots/Cluster Dendrogram.png", 
+    width = 10, 
+    height = 5, 
+    units = "in", 
+    res = 300) # Use a good resolution (e.g., 300)
+
+
 # Plot the dendrogram and the module colors underneath
 plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
                     "Module colors",
                     dendroLabels = FALSE, hang = 0.03,
                     addGuide = TRUE, guideHang = 0.05)
 
+dev.off()
+
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
 ```
 
 ## Relate Modules to Clinical Traits
@@ -537,6 +646,10 @@ ht <- Heatmap(
   row_title = "Module Eigengenes",
   heatmap_legend_param = list(title = "Correlation")
 )
+
+png(filename = "plots/module_trait_heatmap.png", width = 8, height = 10, units = "in", res = 300) 
+draw(ht)
+dev.off() 
 
 draw(ht)
 
@@ -652,21 +765,29 @@ final_mdeg_list_filtered
 
 ```{r}
 # Generate heatmap for MDEGs
-pheatmap(combat_expr[final_mdeg_list_filtered, ],
+
+col_fun = colorRamp2(c(-5, 0, 5), c("blue", "white", "red"))
+
+mdeg_heatmap <- ComplexHeatmap::pheatmap(combat_expr[final_mdeg_list_filtered, ],
          main = "Heatmap of MDEGs",
          annotation_col = annotation_col,
-         scale = "row",          # Scale each gene's expression to have a mean of 0 and SD of 1 (Z-score)
-         show_rownames = TRUE,  # Show gene names
-         show_colnames = FALSE,  # Hides sample names for a cleaner look
-         cluster_cols = TRUE,    # Clusters the samples (columns) based on similarity
-         cluster_rows = TRUE,    # Clusters the genes (rows) based on similarity
-         treeheight_row = 0,     # Hides the row dendrogram for a cleaner look if desired
+         scale = "row",
+         color = col_fun, 
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         treeheight_row = 0,
          legend = TRUE
 )
+png(filename = "plots/Heatmap of MDEGs.png", width = 10, height = 8, units = "in", res = 300)
+print(mdeg_heatmap)
+dev.off()
 
+print(mdeg_heatmap)
 
 mdeg_stats <- all_genes[final_mdeg_list_filtered, ]
-mdeg_stats
+head(mdeg_stats)
 ```
 
 # Functional Analysis and Network Construction
@@ -721,7 +842,7 @@ top_go_combined$negLogAdjP <- -log10(top_go_combined$p.adjust)
 
 
 # Plot
-p <- ggplot(top_go_combined, aes(x = negLogAdjP, y = Description, fill = ONTOLOGY)) +
+go_plot <- ggplot(top_go_combined, aes(x = negLogAdjP, y = Description, fill = ONTOLOGY)) +
   # Add the bars to the plot
   geom_col() +
   # Add a title and axis labels
@@ -735,8 +856,11 @@ p <- ggplot(top_go_combined, aes(x = negLogAdjP, y = Description, fill = ONTOLOG
   facet_wrap(~ ONTOLOGY, scales = "free_y", ncol = 1) +
   theme_minimal()
 
+ggsave("plots/GOplot.png", plot = go_plot, width = 12, height = 6, dpi = 300)
+
+
 # Print the plot
-print(p)
+print(go_plot)
 ```
 
 ## KEGG Pathway Analysis
@@ -753,7 +877,7 @@ kegg_results_df <- as.data.frame(kegg_results)
 kegg_results_df$negLogAdjP <- -log10(kegg_results_df$p.adjust)
 
 # Plot
-p <- ggplot(kegg_results_df, aes(x = negLogAdjP, y = reorder(Description, negLogAdjP), fill = subcategory)) +
+kegg_plot <- ggplot(kegg_results_df, aes(x = negLogAdjP, y = reorder(Description, negLogAdjP), fill = subcategory)) +
   # Add the bars to the plot
   geom_col() +
   # Add a title and axis labels
@@ -766,19 +890,19 @@ p <- ggplot(kegg_results_df, aes(x = negLogAdjP, y = reorder(Description, negLog
   theme_minimal()
 
 # Print the plot
-print(p)
+print(kegg_plot)
 
 
-ggsave("KEGG_dotplot2.png", plot = p, width = 8, height = 6, dpi = 300)
+ggsave("plots/KEGG_dotplot2.png", plot = kegg_plot, width = 8, height = 6, dpi = 300)
 
 ```
 
 ```{r}
 
 #Cnetplot
-kegg4 <- cnetplot(kegg_results, categorySize = "pvalue", foldChange = NULL)
-kegg4
-ggsave("KEGG_cnetplot.png", plot = kegg4, width = 8, height = 6, dpi = 300)
+kegg_cnet <- cnetplot(kegg_results, categorySize = "pvalue", foldChange = NULL)
+kegg_cnet
+ggsave("plots/KEGG_cnetplot.png", plot = kegg_cnet, width = 8, height = 6, dpi = 300)
 
 
 ```
@@ -787,8 +911,20 @@ ggsave("KEGG_cnetplot.png", plot = kegg4, width = 8, height = 6, dpi = 300)
 
 ```{r PPI Network and Hub Genes, cache=TRUE}
 
-# 1. Initialize STRING database object
-string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400) # 9606 is the taxon ID for human
+cache_dir <- "string_db_cache"
+
+# Check if the directory exists, and create it if it doesn't
+if (!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}
+
+# 1. Initialize STRING database object with the local cache directory
+string_db <- STRINGdb$new(
+  version = "11.5",
+  species = 9606,
+  score_threshold = 400,
+  input_directory = cache_dir # Use the variable for the directory path
+)
 
 # 2. Map your gene symbols to STRING identifiers
 mapped_genes <- string_db$map(data.frame(gene = final_mdeg_list_filtered), "gene", removeUnmappedRows = TRUE)
@@ -863,6 +999,7 @@ if (nrow(mapped_genes) > 0) {
 
 ```
 
+
 ```{r}
 
 # --- Visualization 1: Enhanced PPI Network ---
@@ -902,7 +1039,7 @@ if (exists("ppi_graph") && vcount(ppi_graph) > 0) {
 }
 
 #save the plot
-ggsave("PPI_Network_Enhanced.png", width = 12, height = 8, dpi = 300)
+ggsave("plots/PPI_Network_Enhanced.png", width = 12, height = 8, dpi = 300)
 
 ```
 
@@ -933,7 +1070,7 @@ if (exists("network_nodes") && nrow(network_nodes) > 0) {
 }
 
 #save the plot
-ggsave("Top10_Hub_Genes_Barplot.png", width = 8, height = 6, dpi = 300)
+ggsave("plots/Top10_Hub_Genes_Barplot.png", width = 8, height = 6, dpi = 300)
 
 
 ```
@@ -972,7 +1109,7 @@ if (exists("ppi_graph") && "community" %in% vertex_attr_names(ppi_graph)) {
 }
 
 #save the plot
-ggsave("PPI_Community_Facet_Plot.png", width = 12, height = 8, dpi = 300)
+ggsave("plots/PPI_Community_Facet_Plot.png", width = 12, height = 8, dpi = 300)
 
 ```
 
@@ -1023,24 +1160,21 @@ write.table(
     col.names = TRUE # Keeps the column names (e.g., sample IDs)
 )
 
-head(cibersort_input)
+head(cibersort_input[,1:5])
 ```
 
 ## CIBERSORT Analysis
 
 ```{r Run_CIBERSORT, cache=TRUE}
 
-#
-## --- Run CIBERSORT ---
-## Load the CIBERSORT source script
+### Uncomment only if you have "CIBERSORT.R" and "LM22.txt". 
+### Otherwise use the web based tool to get the results and use the output of that
+### to run the downstream analysis
+
+
 #source("CIBERSORT.R")
-#
-## This function call might take a few minutes.
-## It uses the LM22 signature matrix for 22 immune cell types.
-## perm=100 runs 100 permutations for p-value calculation.
 #results_cibersort <- CIBERSORT("LM22.txt", cibersort_input, perm = 100, QN = FALSE)
-#
-#
+
 
 ```
 
@@ -1050,16 +1184,12 @@ conflicts_prefer(base::setdiff)
 results_cibersort <- read.csv("cibersort_results/CIBERSORTx_Job1_Results.csv", row.names = 1)
 
 
-
-# CIBERSORT returns a matrix. Let's look at the first few rows and columns.
-head(results_cibersort[, 1:6])
-
 # Filter results for samples with a significant deconvolution p-value (as suggested by the paper)
 results_cibersort_filtered <- as.data.frame(results_cibersort[results_cibersort[, "P.value"] < 0.05, ])
+
 # We only want the cell type proportions (the first 22 columns)
 immune_proportions <- results_cibersort_filtered[, 1:22]
 
-head(immune_proportions)
 ```
 
 ## Visualize CIBERSORT Results
@@ -1204,6 +1334,8 @@ ggsave("cibersort_results/plots/Heatmap of Immune Cells.png", plot = heat_map, w
 
 This section replicates Figure 7 from the paper using Seurat. Wrote a different script for this section.
 
+
+
 # Candidate Drug Screening
 
 This section uses the API call for Comparative Toxicogenomic Database (CTD). The 10 identified hub genes were imported into CTD and screened for compounds that could reduce the functional effects of these hub genes. Specifically, compounds that could either reduce the expression of overexpressed genes in PAH patients or increase the expression of underexpressed genes were identified, serving as potential targeted drugs for PAH.
@@ -1222,28 +1354,88 @@ conflicts_prefer(httr::content)
 library(jsonlite)
 ```
 
-```{r}
+```{r Download Data from CTD}
 # 2. Prepare to collect the data
 results <- list()
 cat("Querying CTD for chemical-gene interactions...\n")
 
 # 3. Iterate through each gene and query the CTD API
+
+# Initialize a counter for genes with zero results (optional, but helpful for context)
+no_data_count <- 0 
+captcha_triggered <- FALSE # Flag to stop the loop if Captcha is hit
+
 for (gene in hub_genes$symbol) {
-  # Construct the API URL for curated chemical-gene interactions
-  url <- paste0("https://ctdbase.org/tools/batchQuery.go?inputType=gene&inputTerms=", gene, "&report=cgixns&format=json")
+  
+  # Check if the CAPTCHA has been triggered and stop further requests if so
+  if (captcha_triggered) {
+    warning("Loop stopped: Please complete the CAPTCHA verification in a browser.")
+    break
+  }
+  
+  # Construct the API URL (includes the mandatory &actionTypes=ANY)
+  url <- paste0("https://ctdbase.org/tools/batchQuery.go?inputType=gene&inputTerms=", gene, "&report=cgixns&format=json", "&actionTypes=ANY")
   
   response <- GET(url)
+  status <- status_code(response)
+  content_type <- http_type(response)
   
-  if (http_type(response) == "application/json") {
-    data <- fromJSON(content(response, "text", encoding = "UTF-8"), flatten = TRUE)
-    if (length(data) > 0 && nrow(data) > 0) {
-      results[[gene]] <- data
+  if (status == 200) {
+    
+    # --- Check for CAPTCHA (HTML content) ---
+    if (content_type == "text/html" && nchar(content(response, "text", encoding = "UTF-8")) > 500) { 
+      # High character count confirms it's a full HTML page, not just '[]'
+      warning(paste0("CAPTCHA TRIGGERED for gene: ", gene, ". Please open the URL below in a browser, complete the verification, and then re-run the script."))
+      warning(paste0("Verification URL: ", url))
+      captcha_triggered <- TRUE # Set flag to stop loop after this iteration
+      next # Skip to the next iteration (which will break)
     }
+    
+    # --- Process successful JSON/Text content ---
+    content_text <- content(response, "text", encoding = "UTF-8")
+    
+    # Only attempt to parse if the content is not empty/blank (zero results)
+    if (nchar(trimws(content_text)) > 2) { 
+      
+      data <- tryCatch({
+        fromJSON(content_text, flatten = TRUE)
+      }, error = function(e) {
+        warning(paste("Error parsing content for gene:", gene, "Content type was:", content_type))
+        return(NULL) 
+      })
+      
+      # If data was successfully parsed AND it contains rows, save it
+      if (!is.null(data) && length(data) > 0 && nrow(data) > 0) {
+        results[[gene]] <- data
+      } else {
+        # 200 OK, parsed successfully but returned 0 rows (e.g., received '[]')
+        no_data_count <- no_data_count + 1
+      }
+      
+    } else {
+      # 200 OK, but content was practically empty (No Curated Data Found)
+      no_data_count <- no_data_count + 1
+    }
+    
   } else {
-    warning(paste("Failed to retrieve data for gene:", gene))
+    # Unsuccessful HTTP Status (e.g., 404, 500)
+    warning(paste0("API request failed for gene: ", gene, ". Unsuccessful HTTP Status: ", status, " (Type: ", content_type, ")"))
   }
+  
+  # Implement a delay to prevent rate-limiting/bot-detection
+  Sys.sleep(1) 
 }
 
+if (!captcha_triggered) {
+  print(paste("Total genes with no curated data found:", no_data_count))
+}
+
+
+```
+
+
+
+```{r}
 cat("Processing results...\n")
 
 # 4. Process the results to create the ranked table
@@ -1306,7 +1498,7 @@ if (nrow(all_interactions) > 0) {
   colnames(drug_candidates) <- c("Compound name", "Compound ID", "Increase gene expression", "Decrease gene expression", "Affected Hub Genes Count")
   
   # Print the final, ranked table to the console
-  print(drug_candidates)
+  print(head(drug_candidates))
   
 } else {
   cat("No chemical-gene expression interactions were found for the provided hub genes.\n")
@@ -1315,4 +1507,26 @@ if (nrow(all_interactions) > 0) {
 # Save the results to a CSV file
 write.csv(drug_candidates, "Candidate_Drug_Interactions.csv", row.names = FALSE)
 
+
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
