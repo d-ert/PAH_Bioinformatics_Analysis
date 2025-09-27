@@ -1,0 +1,405 @@
+# Single Cell RNA-seq Analysis of GSE169471 Dataset for PAH 
+
+## Load necessary libraries
+```{r setup, quiet=TRUE, message=FALSE}}
+# For CRAN packages
+packages_to_install <- c("Seurat", "dplyr", "patchwork", "GEOquery")
+for (pkg in packages_to_install) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+}
+
+# For Bioconductor packages
+bioc_packages_to_install <- c("SingleR", "celldex", "hdf5r")
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+for (pkg in bioc_packages_to_install) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg)
+  }
+}
+
+# For GitHub packages (CellChat)
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
+if (!requireNamespace("CellChat", quietly = TRUE)) {
+  devtools::install_github("jinworks/CellChat")
+}
+
+
+# Load all the libraries for the session
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(GEOquery)
+library(SingleR)
+library(celldex)
+library(CellChat)
+
+```
+
+
+```{r Data Download}
+
+# Define key variables at the top for easy access and modification.
+GEO_ID <- "GSE169471"
+SAMPLES <- c("GSM5206779", "GSM5206780", "GSM5206781")
+DATA_DIR <- "scRNA_data"
+
+# Create a directory to store the data if it doesn't already exist.
+if (!dir.exists(DATA_DIR)) {
+  dir.create(DATA_DIR)
+}
+
+# Download supplementary files from GEO.
+# getGEOSuppFiles will use a local cache if the data has been downloaded before.
+cat("Downloading supplementary data from GEO:", GEO_ID, "...\n")
+getGEOSuppFiles(GEO_ID, makeDirectory = FALSE, baseDir = DATA_DIR)
+
+# Unpack the downloaded .tar file which contains the raw data.
+tar_file <- file.path(DATA_DIR, paste0(GEO_ID, "_RAW.tar"))
+if (file.exists(tar_file)) {
+  cat("Unpacking data files...\n")
+  untar(tar_file, exdir = DATA_DIR)
+} else {
+  stop("Could not find the downloaded .tar file.")
+}
+
+```
+```{r Data Loading}
+# Use lapply for a more concise way to load multiple datasets.
+seurat_objects <- lapply(SAMPLES, function(sample_id) {
+  # Find the unique .h5 file for the current sample.
+  h5_file_path <- list.files(
+    path = DATA_DIR,
+    pattern = paste0(sample_id, ".*\\.h5$"),
+    full.names = TRUE
+  )
+  
+  if (length(h5_file_path) == 1) {
+    cat("Loading data for sample:", sample_id, "\n")
+    counts <- Read10X_h5(filename = h5_file_path)
+    # Create a Seurat object, assigning the sample ID to the 'project' slot.
+    CreateSeuratObject(counts = counts, project = sample_id)
+  } else {
+    warning(paste("Could not find a unique .h5 file for sample:", sample_id))
+    return(NULL)
+  }
+})
+
+# Filter out any NULL entries that resulted from missing files.
+seurat_objects <- Filter(Negate(is.null), seurat_objects)
+
+# Merge the individual Seurat objects into a single object for analysis.
+if (length(seurat_objects) > 1) {
+  cat("Merging Seurat objects...\n")
+  merged_seurat <- merge(
+    x = seurat_objects[[1]],
+    y = seurat_objects[2:length(seurat_objects)],
+    add.cell.ids = SAMPLES,
+    project = "PAH_Project"
+  )
+} else if (length(seurat_objects) == 1) {
+  merged_seurat <- seurat_objects[[1]]
+} else {
+  stop("No Seurat objects were successfully loaded.")
+}
+
+# Display the merged object's structure and metadata head.
+print(merged_seurat)
+cat("Verification: 'orig.ident' column in metadata.\n")
+head(merged_seurat@meta.data)
+
+
+
+```
+
+
+
+
+
+
+
+# Preprocessing and Quality Control
+
+```{r}
+cat("Starting Quality Control...\n")
+
+cat("Calculating mitochondrial DNA percentage...\n")
+merged_seurat[["percent.mt"]] <- PercentageFeatureSet(merged_seurat, pattern = "^MT-")
+
+# Visualize QC metrics BEFORE filtering to determine appropriate thresholds.
+cat("Displaying QC metrics before filtering...\n")
+plot1 <- VlnPlot(merged_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+plot2 <- FeatureScatter(merged_seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+combined_plot <- plot1 + plot2
+
+ggsave(
+  filename = "scRNA_data/plots/QC_Metrics_Unfiltered.png",  # The name of the output file
+  plot = combined_plot,                # The plot object to save
+  width = 14,                          # Width in inches
+  height = 8,                          # Height in inches
+  dpi = 300                            # Resolution in dots per inch (for high quality)
+)
+print(combined_plot)
+
+# Filter out low-quality cells.
+# Thresholds:
+# - nFeature_RNA > 200: Removes empty droplets or dead cells.
+# - nFeature_RNA < 2500: Removes potential doublets.
+# - percent.mt < 5: Removes cells with high mitochondrial content, often a sign of stress or apoptosis.
+
+cat("Subsetting the data based on QC metrics...\n")
+seurat_filtered <- subset(merged_seurat, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+# Display the dimensions after filtering.
+cat("Data dimensions after filtering:\n")
+print(seurat_filtered)
+
+# Visualize QC metrics AFTER filtering to confirm the effect.
+cat("Displaying QC metrics after filtering...\n")
+plot_filtered <- VlnPlot(seurat_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+
+print(plot_filtered)
+
+ggsave(
+  filename = "scRNA_data/plots/QC_Metrics_Filtered.png",  # The name of the output file
+  plot = plot_filtered,                # The plot object to save
+  width = 14,                          # Width in inches
+  height = 8,                          # Height in inches
+  dpi = 300                            # Resolution in dots per inch (for high quality)
+)
+
+
+```
+## Data Normalization, Scaling
+
+After filtering, we need to normalize the data to account for differences in library size (sequencing depth) per cell. Then, we'll identify the most variable genes to focus on for downstream analysis and scale the data to prevent highly-expressed genes from dominating the results.
+
+
+```{r Data Normalization and Scaling}
+
+cat("Normalizing the data...\n")
+seurat_filtered <- NormalizeData(seurat_filtered, normalization.method = "LogNormalize", scale.factor = 10000)
+
+cat("Identifying highly variable features...\n")
+seurat_filtered <- FindVariableFeatures(seurat_filtered, selection.method = "vst", nfeatures = 2000)
+
+cat("Scaling the data...\n")
+# This step can be memory-intensive
+all.genes <- rownames(seurat_filtered)
+seurat_filtered <- ScaleData(seurat_filtered, features = all.genes)
+
+saveRDS(seurat_filtered, file = "seurat_scaled_data.rds")
+
+rm(all.genes)
+gc() # Garbage collection to free up memory
+
+## To load it later
+seurat_filtered <- readRDS("seurat_scaled_data.rds")
+
+print(seurat_filtered)
+
+```
+
+## PCA
+
+We perform Principal Component Analysis (PCA) to reduce the high-dimensional gene expression data into a smaller number of principal components. This helps to capture the most significant sources of variation in the dataset. An ElbowPlot helps us decide how many of these components to use for clustering.
+
+
+```{r PCA}
+cat("Running PCA for dimensionality reduction...\n")
+seurat_filtered <- RunPCA(seurat_filtered, features = VariableFeatures(object = seurat_filtered))
+
+# Visualize PCA results
+print(VizDimLoadings(seurat_filtered, dims = 1:2, reduction = "pca"))
+pca_plot <- DimPlot(seurat_filtered, reduction = "pca")
+print(pca_plot)
+
+#save the pca
+ggsave(
+  filename = "scRNA_data/plots/PCA.png",  # The name of the output file
+  plot = pca_plot,                # The plot object to save
+  width = 8,                          # Width in inches
+  height = 6,                          # Height in inches
+  dpi = 300                            # Resolution in dots per inch (for high quality)
+)
+
+# Use an ElbowPlot to determine the significant dimensions for clustering
+cat("Generating ElbowPlot to determine significant PCs...\n")
+elbow_plot <- ElbowPlot(seurat_filtered)
+print(elbow_plot)
+# From the plot, we typically choose the number of dimensions where the variance explained "flattens out".
+# For this example, we'll proceed with the first 15 PCs, but you can adjust this based on your plot.
+
+#save the plots
+ggsave(
+  filename = "scRNA_data/plots/PCA_ElbowPlot.png",  # The name of the output file
+  plot = elbow_plot,                # The plot object to save
+  width = 8,                          # Width in inches
+  height = 6,                          # Height in inches
+  dpi = 300                            # Resolution in dots per inch (for high quality)
+)
+
+```
+
+
+#DEBUG
+```{r}
+#-------------------------------------------------------------------------------
+# STEP 1: Fix the Seurat object by joining the multiple data layers into one.
+# This is the most important step to fix the performance issue.
+#-------------------------------------------------------------------------------
+cat("Joining layers to streamline the Seurat object...\n")
+seurat_filtered <- JoinLayers(seurat_filtered)
+
+# Verify the object structure is now simpler (should no longer show 7 layers)
+print(seurat_filtered)
+
+
+#-------------------------------------------------------------------------------
+# STEP 2: Re-run the processing pipeline on the corrected object.
+# This time we will only scale the variable features, which is much faster.
+#-------------------------------------------------------------------------------
+
+cat("Re-normalizing data on the streamlined object...\n")
+seurat_filtered <- NormalizeData(seurat_filtered)
+
+cat("Finding variable features...\n")
+seurat_filtered <- FindVariableFeatures(seurat_filtered, selection.method = "vst", nfeatures = 2000)
+
+cat("Scaling data (ONLY on variable features - this will be fast)...\n")
+seurat_filtered <- ScaleData(seurat_filtered, features = VariableFeatures(object = seurat_filtered))
+
+cat("Running PCA...\n")
+seurat_filtered <- RunPCA(seurat_filtered, features = VariableFeatures(object = seurat_filtered))
+
+
+#-------------------------------------------------------------------------------
+# STEP 3: Now, run UMAP. This should be very fast.
+#-------------------------------------------------------------------------------
+cat("Running UMAP on the corrected and efficiently processed object...\n")
+seurat_filtered <- RunUMAP(seurat_filtered, dims = 1:15)
+
+# The UMAP should complete in under 2 minutes, likely much faster.
+cat("UMAP complete! Now proceeding with clustering and plotting...\n")
+
+# Proceed with the final steps
+seurat_filtered <- FindNeighbors(seurat_filtered, dims = 1:15)
+seurat_filtered <- FindClusters(seurat_filtered, resolution = 0.5)
+
+# Visualize the final result
+DimPlot(seurat_filtered, reduction = "umap", label = TRUE)
+```
+
+
+## Cell Clustering and Visualization (t-SNE)
+
+Now, we will use the selected principal components to build a graph of cell-to-cell relationships and then partition this graph to find clusters of cells with similar expression profiles. We will then use t-SNE for visualization, as was done in the paper (Figure 7).
+
+
+```{r Clustering and t-SNE}
+
+## We use the dimensions determined from the ElbowPlot
+#cat("Finding neighbors and clustering cells...\n")
+#seurat_filtered <- FindNeighbors(seurat_filtered, dims = 1:15)
+#seurat_filtered <- FindClusters(seurat_filtered, resolution = 0.5) # Resolution can be adjusted to change cluster granularity
+#
+#cat("Running t-SNE for visualization...\n")
+#seurat_filtered <- RunTSNE(seurat_filtered, dims = 1:15)
+#
+## Visualize the clusters on a t-SNE plot
+## This plot will be similar to Figure 7B in the paper
+#tsne_plot <- DimPlot(seurat_filtered, reduction = "tsne", label = TRUE)
+#print(tsne_plot)
+#
+
+```
+
+
+
+```{r}
+# Instead of RunTSNE, use RunUMAP. It uses the same input.
+cat("Running UMAP for visualization...\n")
+seurat_filtered <- RunUMAP(seurat_filtered, dims = 1:15)
+
+# Then, when you plot, just specify reduction = "umap"
+cat("Visualizing clusters on a UMAP plot...\n")
+umap_plot <- DimPlot(seurat_filtered, reduction = "umap", label = TRUE)
+print(umap_plot)
+
+ggsave(
+  filename = "scRNA_data/plots/UMAP.png",  # The name of the output file
+  plot = umap_plot,                # The plot object to save
+  width = 8,                          # Width in inches
+  height = 6,                          # Height in inches
+  dpi = 300                            # Resolution in dots per inch (for high quality)
+)
+
+```
+
+
+## Cell Type Annotation with SingleR
+
+To assign biological identities to our clusters, we'll use the SingleR package. It compares the gene expression profile of each cell against a reference dataset of pure, annotated cell types. We will use the HumanPrimaryCellAtlasData reference for this.
+
+
+
+
+```{r Cell Type Annotation}
+cat("Annotating clusters using SingleR...\n")
+
+# Convert the Seurat object to a SingleCellExperiment object for SingleR
+sce_data <- as.SingleCellExperiment(seurat_filtered)
+
+# Load the reference dataset
+hpca.ref <- celldex::HumanPrimaryCellAtlasData()
+
+# Perform the annotation
+# Note: This can take a few minutes
+predictions <- SingleR(
+  test = sce_data,
+  ref = hpca.ref,
+  labels = hpca.ref$label.main # Use main labels for broader cell types
+)
+
+# Add the predicted labels back to the Seurat object's metadata
+seurat_filtered$singleR_labels <- predictions$labels
+
+# Visualize the annotated cell types on the t-SNE plot
+# This will replicate the concept of Figure 7C in the paper
+annotated_tsne_plot <- DimPlot(seurat_filtered, reduction = "tsne", group.by = "singleR_labels", label = TRUE, repel = TRUE)
+print(annotated_tsne_plot)
+
+```
+
+
+## Visualization of Key Hub Genes
+
+Finally, let's confirm the expression of the 10 key hub genes identified in the paper's abstract. This step helps to replicate the findings shown in Figure 7F.
+
+
+```{r Marker Gene Visualization}
+# The 10 hub genes identified in the study
+hub_genes <- c("S100A12", "S100A8", "LCN2", "S100A9", "AQP9", "SAA1", "IL1R2", "OGN", "ASPN", "COL14A1")
+
+# Visualize gene expression on the t-SNE plot
+cat("Generating FeaturePlots for key hub genes...\n")
+feature_plot <- FeaturePlot(seurat_filtered, features = hub_genes, ncol = 4)
+print(feature_plot)
+
+# Visualize expression using violin plots
+vln_plot <- VlnPlot(seurat_filtered, features = hub_genes, group.by = "singleR_labels", pt.size = 0, ncol = 2) +
+  NoLegend()
+print(vln_plot)
+
+
+```
+
+
+
+
+
