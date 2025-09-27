@@ -72,7 +72,7 @@ BiocManager::install(c("GEOquery", "Biobase", "affy", "limma", "sva", "ComplexHe
 
 ## How to Run the Script
 
-1.  **Clone the repository or save the script**: Download the R script (`PAH_GEO_replication.R`) to your local machine.
+1.  **Clone the repository or save the script**: Download the R script (`PAH_analysis.Rmd`) to your local machine.
 2.  **Set Working Directory**: Open the R script in RStudio or your preferred R environment and set the working directory to the script's location.
 3.  **Execute the Script**: Run the script from top to bottom. The script is designed to be executed sequentially.
 
