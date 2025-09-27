@@ -1,8 +1,8 @@
 # Replication of Pulmonary Arterial Hypertension (PAH) Gene Expression Analysis
 
-This repository contains an R script for a comprehensive bioinformatics analysis of Pulmonary Arterial Hypertension (PAH) using publicly available gene expression data from the Gene Expression Omnibus (GEO). The script replicates a study by Deniz Ertuğrul, aiming to identify key genes, pathways, and potential therapeutic compounds related to PAH.
+This repository contains an R script for a comprehensive bioinformatics analysis of Pulmonary Arterial Hypertension (PAH) using publicly available gene expression data from the Gene Expression Omnibus (GEO). The script replicates the study **Bioinformatics analysis of the GEO database for the identification of novel biomarkers and potential targeted drugs for pulmonary hypertension** by Lu et al. (2024) (https://doi.org/10.36922/gpd025080018)
 
-The analysis integrates two GEO datasets (GSE117261 and GSE113439), corrects for batch effects, and performs several downstream analyses including differential gene expression, weighted gene co-expression network analysis (WGCNA), immune cell infiltration, and candidate drug screening.
+The analysis integrates two GEO datasets (GSE117261 and GSE113439), corrects for batch effects, and performs several downstream analyses including differential gene expression, weighted gene co-expression network analysis (WGCNA), immune cell infiltration, and candidate drug screening. Also, a second script performs scRNA seq analysis using the hub genes discovered from the functional analyses and the 3 PAH samples from the dataset GSE169471.
 
 ## Workflow Overview
 
