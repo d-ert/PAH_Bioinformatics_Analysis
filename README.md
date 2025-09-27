@@ -46,6 +46,13 @@ The analysis pipeline is structured as follows:
     *   Screens for chemical compounds that are known to affect the expression of the identified hub genes.
     *   Generates a ranked list of potential drug candidates for PAH.
 
+9. **Single-Cell RNA-seq Analysis (scRNA-seq)**:
+
+   * Downloads and loads the GSE169471 dataset, performs QC to filter out low-quality cells, and applies standard normalization and scaling procedures using the Seurat package.  
+   * Utilizes PCA and UMAP for dimensionality reduction and visualization, followed by automated cell type annotation for each cluster using the SingleR package against a reference atlas.  
+   * Validates the findings from the bulk RNA-seq analysis by creating feature plots and violin plots to visualize the expression of key hub genes across different identified cell types.  
+
+
 ## Prerequisites
 
 To run this script, you need R and the following R packages installed. You can install them from CRAN or Bioconductor.
