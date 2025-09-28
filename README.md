@@ -6,9 +6,9 @@ The analysis integrates two GEO datasets (GSE117261 and GSE113439), corrects for
 
 ## Workflow Overview
 
-Preview of the main script workflow: 
+Preview of the main script workflow: https://d-ert.github.io/PAH_Replication/PAH_analysis.html
 
-Preview of the scRNA workflow: https://d-ert.github.io/PAH_Replication/
+Preview of the scRNA workflow: https://d-ert.github.io/PAH_Replication/scRNA_Analysis.html
 
 The analysis pipeline is structured as follows:
 
